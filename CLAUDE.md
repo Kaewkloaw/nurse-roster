@@ -17,7 +17,7 @@ There is no package.json, test suite or linter. Firebase SDK v10.12.2 is importe
 
 ## Demo mode vs. Firebase
 
-`FIREBASE_CONFIG` near the top of the script holds placeholders (`"ใส่ค่า"`). While `apiKey` starts with `ใส่`, `DEMO` is true and the app uses `makeDemoBackend()`, an in-memory fake with the same interface as `makeFirebaseBackend()`, seeded by `seedDemo()`. Data is lost on reload. Any new persistence call must be added to **both** backends (the `B.*` interface: roles, units, months, leaves, plus `watch*` listeners).
+`FIREBASE_CONFIG` near the top of the script is configured for the `nurseroster-df4d8` Firebase project. If `apiKey` is empty or starts with `ใส่`, `DEMO` is true and the app uses `makeDemoBackend()`, an in-memory fake with the same interface as `makeFirebaseBackend()`, seeded by `seedDemo()`. Data is lost on reload. Any new persistence call must be added to **both** backends (the `B.*` interface: roles, units, months, leaves, plus `watch*` listeners).
 
 ## Data model (Firestore)
 
@@ -28,7 +28,7 @@ units/{unitId}/months/{YYYY-MM}    assign{}, log[]
 units/{unitId}/leaves/{staffId}    dates{ 'YYYY-MM-DD': true }
 ```
 
-- Assignment keys in `assign` are `"<iso>|<shift M/A/N>|<position>|<index>"`, with values like `{id, ot?, locked?}`. `keyValid()` drops keys that no longer match the rules.
+- Assignment keys in `assign` are `"<iso>|<shift M/A/N>|<position>|<index>"`, with values like `{id, ot?, locked?}`. The current two-shift UI uses M/A. Legacy N assignments are kept separately in `legacyAssign` and written back unchanged so normal edits do not destroy historical night-shift data. `keyValid()` drops visible keys that no longer match the rules.
 - A user's role comes from `roles/{lowercased email}`, and a signed-in user without a role doc cannot do anything.
 
 ## Permissions are enforced in two places that must stay in sync
