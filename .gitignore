@@ -1,0 +1,25 @@
+.DS_Store
+.firebase/
+node_modules/
+
+# กุญแจและความลับ — ห้ามขึ้น GitHub เด็ดขาด
+*-firebase-adminsdk-*.json
+*service-account*.json
+serviceAccountKey.json
+.env
+.env.*
+!.env.example
+.runtimeconfig.json
+
+# log ของ Firebase
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+database-debug.log*
+pubsub-debug.log*
+
+# ข้อมูลพนักงานที่ดาวน์โหลดจากเว็บ (PDPA)
+*.csv
+*.png
+!public/**/*.png
+exports/

@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null && request.auth.token.email != null; }
+    function myEmail()  { return request.auth.token.email.lower(); }
+    function roleDoc()  { return /databases/$(database)/documents/roles/$(myEmail()); }
+    function hasRole()  { return signedIn() && exists(roleDoc()); }
+    function me()       { return get(roleDoc()).data; }
+    function isAdmin()  { return hasRole() && me().role == 'admin'; }
+    function isHeadOf(u)   { return hasRole() && me().role == 'head'  && me().unitId == u; }
+    function isNurseOf(u)  { return hasRole() && me().role == 'nurse' && me().unitId == u; }
+    function changed()  { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    // สิทธิ์ผู้ใช้ — แก้ได้เฉพาะแอดมิน, แต่ละคนอ่านสิทธิ์ของตัวเองได้
+    match /roles/{email} {
+      allow read: if isAdmin() || (signedIn() && myEmail() == email);
+      allow write: if isAdmin();
+    }
+
+    match /units/{unitId} {
+      // แผนก: แอดมินทุกอย่าง / หัวหน้าแก้แผนกตัวเอง / พยาบาลอ่านได้อย่างเดียว
+      allow read: if isAdmin() || isHeadOf(unitId) || isNurseOf(unitId);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (isHeadOf(unitId)
+            && !changed().hasAny(['name'])
+            && (me().get('canEditRules', false) == true || !changed().hasAny(['rules', 'shifts'])));
+
+      // ตารางเวรรายเดือน (YYYY-MM): พยาบาลอ่านได้ แก้ไม่ได้
+      match /months/{monthId} {
+        allow read: if isAdmin() || isHeadOf(unitId) || isNurseOf(unitId);
+        allow write: if isAdmin() || isHeadOf(unitId);
+      }
+
+      // วันไม่ว่างรายคน: พยาบาลอ่าน/แก้ได้เฉพาะของตัวเอง
+      match /leaves/{staffId} {
+        allow read, write: if isAdmin() || isHeadOf(unitId)
+          || (isNurseOf(unitId) && me().staffId == staffId);
+      }
+    }
+  }
+}
