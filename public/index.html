@@ -311,7 +311,6 @@ tr.merow .namebtn{color:var(--sky-dd);font-weight:700}
 </style>
 </head>
 <body>
-<div class="demo-ribbon" id="demoRibbon" hidden>โหมดทดลอง — ยังไม่ได้เชื่อม Firebase ข้อมูลจะหายเมื่อปิดหน้า (ใส่ค่า FIREBASE_CONFIG ตามคู่มือเพื่อใช้งานจริง)</div>
 <header class="top">
   <div class="brand">
     <div class="logo"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M8 2v4M16 2v4M3 10h18M12 13v5M9.5 15.5h5"/></svg></div>
@@ -345,12 +344,6 @@ tr.merow .namebtn{color:var(--sky-dd);font-weight:700}
     <button class="btn btn-primary btn-big" type="submit" id="liBtn">เข้าสู่ระบบ</button>
     <button class="linkbtn" type="button" id="forgotBtn">ลืมรหัสผ่าน?</button>
     <div class="err" id="liErr"></div>
-    <div class="demo-box" id="demoBox" hidden>
-      <b>ลองใช้งาน (โหมดทดลอง)</b>
-      <button class="btn btn-line" type="button" data-demo="admin@demo.local" style="width:100%;justify-content:center">เข้าเป็น แอดมิน (ฝ่ายการพยาบาล)</button>
-      <button class="btn btn-line" type="button" data-demo="head.ent@demo.local" style="width:100%;justify-content:center">เข้าเป็น หัวหน้าแผนก ห้องผ่าตัดโสตฯ</button>
-      <button class="btn btn-line" type="button" data-demo="nurse.ent@demo.local" style="width:100%;justify-content:center">เข้าเป็น พยาบาล (คุณชุติมา) ห้องผ่าตัดโสตฯ</button>
-    </div>
   </form></div>
 </section>
 
@@ -1462,9 +1455,7 @@ window.addEventListener('beforeunload',e=>{if(saveTimer||saving){saveNow();e.pre
 (async function boot(){
   showView('login');
   try{
-    if(DEMO){B=makeDemoBackend();await seedDemo(B);$('#demoRibbon').hidden=false;$('#demoBox').hidden=false;
-      document.querySelectorAll('[data-demo]').forEach(b=>b.onclick=()=>B.signIn(b.dataset.demo));}
-    else B=await makeFirebaseBackend();
+    B=await makeFirebaseBackend();
     B.onAuth(onAuthChanged);
   }catch(e){console.error(e);showLoginError('เชื่อมต่อระบบไม่ได้ — ตรวจสอบอินเทอร์เน็ต หรือค่า FIREBASE_CONFIG')}
 })();
