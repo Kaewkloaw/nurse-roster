@@ -4,6 +4,7 @@ const isoOf=(y,m,d)=>`${y}-${pad(m+1)}-${pad(d)}`;
 const parseIso=iso=>{const [y,m,d]=iso.split('-').map(Number);return{y,m:m-1,d}};
 const dayNum=iso=>{const p=parseIso(iso);return Date.UTC(p.y,p.m,p.d)/864e5};
 const dow=iso=>{const p=parseIso(iso);return new Date(Date.UTC(p.y,p.m,p.d)).getUTCDay()};
+const addDays=(iso,n)=>{const p=parseIso(iso);const t=new Date(Date.UTC(p.y,p.m,p.d+n));return isoOf(t.getUTCFullYear(),t.getUTCMonth(),t.getUTCDate())};
 const daysIn=(y,m)=>new Date(Date.UTC(y,m+1,0)).getUTCDate();
 const be=y=>y+543;
 const shortDate=iso=>{const p=parseIso(iso);return `${DOW_S[dow(iso)]} ${p.d} ${TH_MS[p.m]}`};
@@ -18,6 +19,7 @@ const holCache={};
 function baseHolidays(y){
   if(holCache[y])return holCache[y];
   const map={};
+  for(const k in YEAR_HOL)if(k.startsWith(y+'-'))map[k]=YEAR_HOL[k]; // ใส่ก่อน เพื่อให้วันชดเชยของวันหยุดตายตัวไม่ทับ
   FIXED_HOL.forEach(([m,d,n])=>{map[isoOf(y,m-1,d)]=n});
   FIXED_HOL.forEach(([m,d,n])=>{
     const iso=isoOf(y,m-1,d),w=dow(iso);
@@ -56,6 +58,14 @@ function buildIndex(asg){
   return idx;
 }
 const person=id=>state.staff.find(s=>s.id===id);
+/* เรียงรายชื่อสำหรับแสดงผล: ตามตำแหน่ง แล้ว
+   state.staffSort==='manual' → ตามลำดับใน state.staff (ผู้ใช้เลื่อนเอง)
+   อื่น ๆ → คนที่ไม่อยู่เวรประจำ (เช่น OT เท่านั้น) ก่อน → ชื่อ ก–ฮ */
+const POS_ORDER=Object.fromEntries(POS.map((p,i)=>[p.key,i]));
+const sortStaff=list=>{const at=new Map(state.staff.map((s,i)=>[s.id,i]));
+  return list.slice().sort((a,b)=>(POS_ORDER[a.pos]-POS_ORDER[b.pos])||(state.staffSort==='manual'?at.get(a.id)-at.get(b.id):
+    ((a.oc!==false)-(b.oc!==false))||String(a.name||'').localeCompare(String(b.name||''),'th')));};
+const staffOf=pos=>sortStaff(state.staff.filter(s=>s.pos===pos));
 const fullName=id=>{const p=person(id);return p?'คุณ'+p.name:'(ไม่พบชื่อ)'};
 const firstName=id=>{const p=person(id);return p?p.name.split(' ')[0]:'?'};
 const slotWord=x=>x.ot?'OT':SHIFTS[x.shift].label;
@@ -65,6 +75,7 @@ function problems(key,id,idx){
   const [iso,sh,slot]=key.split('|');const dn=dayNum(iso);const r=state.rules;const res=[];const off=isOff(iso);const isOT=SLOTM[slot].ot;
   const st=person(id);
   if(st&&!eligible(st,slot))res.push({t:isOT?'ไม่ได้รับ OT':'ไม่อยู่ในเวร OC ของตำแหน่งนี้',lv:1});
+  else if(st&&!isOT&&(st.noShift||[]).includes(sh))res.push({t:'ไม่ขึ้นเวร'+SHIFTS[sh].label,lv:1});
   if(state.unavail[id]&&state.unavail[id][iso])res.push({t:'ไม่ว่าง / ลา วันนี้',lv:2});
   const mine=(idx[id]||[]).filter(x=>x.key!==key);
   for(const x of mine){
@@ -80,6 +91,16 @@ function problems(key,id,idx){
       else if(r.evNextMorning&&prevSh==='A'&&nextSh==='M')res.push({t:SHIFTS[prevSh].label+'ต่อเช้าวันรุ่งขึ้น ('+shortDate(x.iso)+')',lv:1});
       else if(r.noSameShiftConsec&&x.shift===sh)res.push({t:'เวร'+SHIFTS[sh].label+'ติดกัน 2 วัน ('+shortDate(x.iso)+')',lv:1});
     }
+  }
+  // กฎห้ามอยู่เวรร่วมกัน (rules.conflicts): กลุ่ม a ในช่อง aSlot ห้ามอยู่วัน/เวรเดียวกับกลุ่ม b ในช่อง bSlot
+  for(const c of (r.conflicts||[])){
+    const sideOf=(pid,sl,grp,gs)=>grp.includes(pid)&&(gs==='any'||gs===sl);
+    [[c.a,c.aSlot,c.b,c.bSlot],[c.b,c.bSlot,c.a,c.aSlot]].forEach(([g1,s1,g2,s2])=>{
+      if(!sideOf(id,slot,g1||[],s1||'any'))return;
+      for(const oid of g2||[]){if(oid===id)continue;
+        if((idx[oid]||[]).some(x=>x.key!==key&&x.iso===iso&&(c.scope!=='shift'||x.shift===sh)&&sideOf(oid,x.pos,g2,s2||'any')))
+          res.push({t:'ห้ามอยู่'+(c.scope==='shift'?'เวรเดียวกับ':'วันเดียวกับ')+' คุณ'+firstName(oid)+(c.note?' ('+c.note+')':''),lv:1});}
+    });
   }
   const mp=monthPrefix();const inMonth=mine.filter(x=>x.iso.startsWith(mp)&&!x.ot);
   if(iso.startsWith(mp)&&!isOT){
@@ -124,8 +145,84 @@ async function loadHistory(){
 }
 function effCounts(idx,id){const c=monthCounts(idx,id),h=HIST[id]||{all:0,off:0,ot:0};return{all:c.all+h.all,off:c.off+h.off,ot:c.ot+h.ot}}
 function variance(a){if(!a.length)return 0;const m=a.reduce((s,x)=>s+x,0)/a.length;return a.reduce((s,x)=>s+(x-m)**2,0)/a.length}
+/* ---------- หมุนเวรตามคิว (OT ทุกวันที่มีช่อง OT + เวรประจำวันนักขัตฤกษ์) ----------
+   rules.rotation = {on, start:'YYYY-MM-DD', otrn:[ids], otpn:[ids], hol:{senior,junior,pn}}
+   คิวไล่ทีละวัน: คนที่ถึงคิวแต่ติดกฎ (ลา/มีเวรวันเดียวกัน) ถูกข้าม แต่ยังอยู่หัวคิว
+   ช่องที่มีคนอยู่แล้ว (ล็อก/แก้มือ) นับว่าคนนั้นใช้คิวแล้ว */
+const ROT_KINDS=[
+  {k:'holSenior',slot:'senior',hol:true,label:'นักขัตฤกษ์ · RN Senior'},
+  {k:'holJunior',slot:'junior',hol:true,label:'นักขัตฤกษ์ · RN Junior'},
+  {k:'holPn',slot:'pn',hol:true,label:'นักขัตฤกษ์ · PN'},
+  {k:'otrn',slot:'otrn',hol:false,label:'OT RN'},
+  {k:'otpn',slot:'otpn',hol:false,label:'OT PN'}];
+const rotOn=()=>!!(state.rules.rotation&&state.rules.rotation.on);
+const rotStart=()=>(state.rules.rotation&&state.rules.rotation.start)||'';
+// ลำดับคิวที่ตั้งไว้ — ถ้ายังไม่ได้ตั้ง ใช้ทุกคนที่มีสิทธิ์ตามลำดับรายชื่อในแผนก
+const rotDefault=kind=>state.staff.filter(s=>eligible(s,kind.slot)).map(s=>s.id);
+function rotOrder(kind){const r=state.rules.rotation||{};const l=(kind.hol?(r.hol||{})[kind.slot]:r[kind.slot])||[];return l.length?l.slice():rotDefault(kind)}
+function rotKindOf(iso,pos){
+  if(!rotOn()||iso<rotStart())return null;
+  if(SLOTM[pos].ot)return ROT_KINDS.find(k=>!k.hol&&k.slot===pos);
+  if(isHolQueueDay(iso))return ROT_KINDS.find(k=>k.hol&&k.slot===pos)||null;
+  return null;
+}
+/* วันที่ใช้คิวนักขัตฤกษ์:
+   1) วันนักขัตฤกษ์ + เสาร์-อาทิตย์ที่ติดกัน (ช่วงวันหยุดต่อเนื่องที่มีวันนักขัตฤกษ์อยู่)
+   2–3) ถ้าช่วงวันหยุดนั้นห่างจากเสาร์-อาทิตย์/วันหยุดอีกช่วงแค่ 1 วันทำงาน → วันทำงานที่คั่น + วันหยุดอีกช่วงนั้นเข้าคิวด้วย */
+function offBlock(iso){let a=iso,b=iso;while(isOff(addDays(a,-1)))a=addDays(a,-1);while(isOff(addDays(b,1)))b=addDays(b,1);return[a,b]}
+function blockHasHol([a,b]){for(let d=a;d<=b;d=addDays(d,1))if(holidayName(d))return true;return false}
+function isHolQueueDay(iso){
+  if(!isOff(iso)){const p=addDays(iso,-1),n=addDays(iso,1);
+    return isOff(p)&&isOff(n)&&(blockHasHol(offBlock(p))||blockHasHol(offBlock(n)));}
+  const blk=offBlock(iso);if(blockHasHol(blk))return true;
+  const p2=addDays(blk[0],-2),n2=addDays(blk[1],2);
+  return (isOff(p2)&&blockHasHol(offBlock(p2)))||(isOff(n2)&&blockHasHol(offBlock(n2)));
+}
+function rotStartQueue(kind){
+  const order=rotOrder(kind);const ok=id=>order.includes(id)&&eligible(person(id),kind.slot);
+  const useOrder=!rotPrevQueue||!rotPrevQueue[kind.k]||shiftYm(-1)<rotStart().slice(0,7);
+  const q=(useOrder?order:rotPrevQueue[kind.k]).filter(ok);
+  order.forEach(id=>{if(ok(id)&&!q.includes(id))q.push(id)});
+  return q;
+}
+/* phase: 'hol' | 'ot' · simulate=true: ไม่เติมช่องว่าง แค่นับคิวจากที่จัดไว้ · until: หยุดก่อนวันนี้ */
+function applyRotation(asg,phase,simulate,until){
+  const idx=buildIndex(asg);const queues={};let unfilled=0;
+  ROT_KINDS.filter(k=>phase==='hol'?k.hol:!k.hol).forEach(kind=>{
+    const q=rotStartQueue(kind);
+    for(const iso of monthDays()){
+      if(until&&iso>=until)break;
+      if(rotKindOf(iso,kind.slot)!==kind)continue;
+      const seen=new Set();
+      shiftsOf(iso).forEach(sh=>{for(let i=0;i<needFor(iso,kind.slot);i++){
+        const ks=pairKeys(`${iso}|${sh}|${kind.slot}|${i}`);if(seen.has(ks[0]))continue;seen.add(ks[0]);
+        const pre=ks.map(k=>asg[k]).find(a=>a&&a.id);let id=pre?pre.id:null;
+        if(!id&&!simulate){id=q.find(x=>!unitProblems(ks,x,idx).length)||null;if(!id)unfilled+=ks.length;}
+        if(!id)continue;
+        if(!simulate)ks.forEach(k=>{if(asg[k]&&asg[k].id)return;asg[k]={id,locked:false,rot:true};
+          (idx[id]=idx[id]||[]).push({key:k,iso,shift:k.split('|')[1],pos:kind.slot,ot:SLOTM[kind.slot].ot,dn:dayNum(iso),off:isOff(iso)});});
+        const j=q.indexOf(id);if(j>=0){q.splice(j,1);q.push(id);}
+      }});
+    }
+    queues[kind.k]=q;
+  });
+  return{queues,unfilled};
+}
+/* คิวตอนสิ้นเดือนปัจจุบัน (คำนวณจากเวรที่จัดจริง) — บันทึกลง months/{YYYY-MM}.rotQueue ให้เดือนถัดไปต่อคิว */
+function rotEndQueues(){
+  if(!rotOn()||monthPrefix()<rotStart().slice(0,7))return null;
+  const a=Object.assign({},state.assign);
+  return Object.assign(applyRotation(a,'hol',true).queues,applyRotation(a,'ot',true).queues);
+}
+/* ลำดับคิวของช่องหนึ่ง ณ วันนั้น (ใช้เรียงผู้สมัครในหน้าต่างเลือกคน) */
+function rotQueueAt(iso,pos){
+  const kind=rotKindOf(iso,pos);if(!kind)return null;
+  return applyRotation(Object.assign({},state.assign),kind.hol?'hol':'ot',true,iso).queues[kind.k];
+}
+
 function autoFill(mode){
-  const slots=monthSlots().sort((a,b)=>(a.ot-b.ot));const mk=new Set(slots.map(s=>s.key));
+  const all=monthSlots();const mk=new Set(all.map(s=>s.key));const rot=rotOn();
+  const slots=all.filter(s=>!(rot&&rotKindOf(s.iso,s.pos))).sort((a,b)=>(a.ot-b.ot));
   const curIdx=buildIndex(state.assign);const base={};
   for(const k in state.assign){
     const a=state.assign[k];if(!a||!a.id)continue;
@@ -134,6 +231,8 @@ function autoFill(mode){
     if(mode==='fix'){const pr=problems(k,a.id,curIdx);const mm=pairMismatch(k,state.assign);
       if((!pr.length&&!mm)||(a.locked&&!pr.some(p=>p.lv===2)))base[k]=a;}
   }
+  // วันนักขัตฤกษ์จัดตามคิวก่อน แล้วค่อยเกลี่ยเวรที่เหลือ (OT ตามคิวจัดทีหลัง เพราะต้องรู้เวรประจำทั้งเดือน)
+  const rotHol=rot?applyRotation(base,'hol').unfilled:0;
   const iters=mode==='fix'?150:300;let best=null;
   for(let it=0;it<iters;it++){
     const asg=Object.assign({},base);const idx=buildIndex(asg);let unfilled=0;
@@ -160,8 +259,9 @@ function autoFill(mode){
     ['otrn','otpn'].forEach(sl=>{const ids=state.staff.filter(s=>eligible(s,sl)).map(s=>s.id);score+=variance(ids.map(id=>effCounts(idx,id).ot))*40;});
     if(!best||score<best.score)best={asg,score,unfilled};
   }
+  const rotOt=rot?applyRotation(best.asg,'ot').unfilled:0;
   mk.forEach(k=>{delete state.assign[k]});
   mk.forEach(k=>{if(best.asg[k])state.assign[k]=best.asg[k]});
-  return best.unfilled;
+  return best.unfilled+rotHol+rotOt;
 }
 

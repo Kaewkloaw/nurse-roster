@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20261108k">
 </head>
 <body>
 <header class="top">
@@ -126,6 +126,8 @@
   <section class="panel" id="tab-people">
     <div class="bar">
       <div class="grow"><b style="font-size:1.1rem" id="peopleTitle"></b><div class="hint" id="peopleHint"></div></div>
+      <select class="textin" id="sortSel" style="width:auto" aria-label="เรียงรายชื่อ"><option value="name">เรียงตามชื่อ ก–ฮ</option><option value="manual">เรียงลำดับเอง</option></select>
+      <button class="btn btn-line" id="lockOrder" type="button"></button>
       <button class="btn btn-line" id="pngPeopleBtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>ดาวน์โหลดรูป PNG (รายคน)</button>
     </div>
     <div class="legend" id="peopleLegend" style="margin-bottom:12px"></div>
@@ -137,6 +139,7 @@
       <div class="grow"><b style="font-size:1.1rem">จำนวนเวรของแต่ละคน เดือนนี้</b><div class="hint">อัปเดตทันทีเมื่อมีการแลกเวรหรือเปลี่ยนคน · “สะสม” = เวรย้อนหลัง 12 เดือน (* = คนใหม่ ใช้ค่าเฉลี่ยของตำแหน่ง) · จัดเวรอัตโนมัติจะให้คนที่สะสมน้อยกว่าได้เวรก่อน เพื่อให้เฉลี่ยเท่ากันทั้งปี</div></div>
       <button class="btn btn-line" id="pngReportBtn">ดาวน์โหลดรูป PNG</button>
       <button class="btn btn-line" id="csvBtn">ดาวน์โหลด Excel (CSV)</button>
+      <button class="btn btn-line" id="holTableBtn">ตารางเวรนักขัตฤกษ์ทั้งปี</button>
     </div>
     <div id="reportBox"></div>
   </section>
@@ -157,11 +160,12 @@
 </div>
 <div id="toast"></div>
 <input type="file" id="fileIn" accept=".json,application/json" hidden>
-<script src="js/config.js"></script>
-<script src="js/state.js"></script>
-<script src="js/rules-engine.js"></script>
-<script src="js/backend.js"></script>
-<script src="js/export.js"></script>
-<script src="js/app.js"></script>
+<script src="js/config.js?v=20261108k"></script>
+<script src="js/state.js?v=20261108k"></script>
+<script src="js/rules-engine.js?v=20261108k"></script>
+<script src="js/preset-2570.js?v=20261108k"></script>
+<script src="js/backend.js?v=20261108k"></script>
+<script src="js/export.js?v=20261108k"></script>
+<script src="js/app.js?v=20261108k"></script>
 </body>
 </html>

@@ -383,3 +383,22 @@ tr.merow .namebtn{color:var(--sky-dd);font-weight:700}
 .fc-pop button{border:0;background:none;text-align:left;padding:10px 12px;border-radius:8px;font-weight:600}
 .fc-pop button:hover{background:#F1F3F8}
 .fc-pop .dg{color:var(--red)}
+
+/* ปุ่มเลื่อนลำดับ (ขึ้น/ลง) แบบกะทัดรัด + ที่จับลาก + ปุ่มลบเล็ก */
+.ord{display:inline-flex;flex-direction:column;flex:none;border:1.5px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}
+.ord button{width:26px;height:16px;display:flex;align-items:center;justify-content:center;border:0;background:none;color:var(--sky-dd);padding:0;cursor:pointer}
+.ord button+button{border-top:1px solid var(--line)}
+.ord button:hover:not([disabled]){background:var(--sky-ll)}
+.ord button[disabled]{color:#C9D4DF;cursor:default}
+.ord svg{width:12px;height:12px}
+.dragh{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:30px;border-radius:6px;color:#9AA7B6;cursor:grab;touch-action:none;user-select:none}
+.dragh:hover{background:var(--sky-ll);color:var(--sky-dd)}
+.dragh svg{width:14px;height:14px}
+.icox{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid var(--line);background:#fff;color:var(--muted);padding:0;cursor:pointer}
+.icox:hover:not([disabled]){border-color:#F0C4C4;color:var(--red);background:#FFF5F5}
+.icox[disabled]{opacity:.45;cursor:default}
+.icox svg{width:12px;height:12px}
+.rotrow{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px dashed var(--line)}
+.rotrow:last-child{border-bottom:0}
+.rotrow .no{width:22px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.rotrow .nm{flex:1;min-width:0}

@@ -51,7 +51,7 @@ async function exportDaily(){
 async function exportPeople(){
   await fontsReady();
   const days=monthDays();const idx=buildIndex(state.assign);const P=state.paper;const n=days.length;
-  const groups=[{label:'RN',list:state.staff.filter(s=>s.pos!=='pn')},{label:'PN',list:state.staff.filter(s=>s.pos==='pn')}].filter(g=>g.list.length)
+  const groups=[{label:'RN',list:sortStaff(state.staff.filter(s=>s.pos!=='pn'))},{label:'PN',list:staffOf('pn')}].filter(g=>g.list.length)
     .map(g=>({...g,list:[...g.list.filter(s=>s.oc===false),...g.list.filter(s=>s.oc!==false)],split:g.list.filter(s=>s.oc===false).length}));
   const cNo=24,cPre=38,cFirst=86,cLast=104,cPos=30,cD=24,RH=21,H1=19,H2=19,M=30,HEAD=118,GAP=60;
   const TW=cNo+cPre+cFirst+cLast+cPos+cD*n,W=TW+M*2;

@@ -1,7 +1,17 @@
 {
   "hosting": {
     "public": "public",
-    "ignore": ["firebase.json", "**/.*"]
+    "ignore": ["firebase.json", "**/.*"],
+    "headers": [
+      {
+        "source": "**/*.@(html|js|css)",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      },
+      {
+        "source": "/",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      }
+    ]
   },
   "firestore": {
     "rules": "firestore.rules"

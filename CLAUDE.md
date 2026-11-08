@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Thai-language nurse shift-roster web app (operating-room nursing units). It is a **single static file**, `public/index.html` (~1,500 lines of inline HTML/CSS/JS, no build step, no npm, no framework), served by Firebase Hosting and backed by Firestore + Firebase Auth. The UI text, comments and domain terms are Thai, and dates display in the Buddhist Era (year + 543).
+A Thai-language nurse shift-roster web app (operating-room nursing units). It is a static site with no build step, no npm and no framework: `public/index.html` (markup), `public/style.css`, and classic (non-module) scripts in `public/js/` loaded in order — `config.js`, `state.js` (constants, global state, date helpers), `rules-engine.js` (slots, rules, rotation, `autoFill`), `preset-2570.js` (2570 staff/rotation preset), `backend.js`, `export.js`, `app.js` (session, load/save, all UI). All top-level names are shared globals across these files. It is served by Firebase Hosting and backed by Firestore + Firebase Auth. The UI text, comments and domain terms are Thai, and dates display in the Buddhist Era (year + 543).
 
 There is no package.json, test suite or linter. Firebase SDK v10.12.2 is imported at runtime from `gstatic.com` as ES modules (`FB_VER` in index.html).
 
@@ -24,7 +24,7 @@ There is no package.json, test suite or linter. Firebase SDK v10.12.2 is importe
 ```
 roles/{email}                      role: admin | head | nurse, unitId, staffId, canEditRules, name
 units/{unitId}                     name, staff[], rules, shifts, paper, holidayOverrides
-units/{unitId}/months/{YYYY-MM}    assign{}, log[]
+units/{unitId}/months/{YYYY-MM}    assign{}, log[], rotQueue?
 units/{unitId}/leaves/{staffId}    dates{ 'YYYY-MM-DD': true }
 ```
 
@@ -49,6 +49,8 @@ Everything shares one global `state` object (current unit and month, staff, rule
 - **Realtime sync:** `watchCurrent()` subscribes to the unit, month and leaves. Snapshots are ignored while a local save is pending or in flight, and when `updatedAt` matches the last local write (echo suppression). This avoids clobbering local edits, so keep that guard when adding listeners.
 - **Months loaded:** `loadMonths()` loads previous, current and next month, because the scheduling rules look across month boundaries.
 - **Rules engine:** `problems()`, `slotIssues()` and `unitProblems()` validate a slot against `state.rules` (evening followed by next morning, holiday consistency, same-day double shifts, consecutive shifts, per-month caps). They work from the `buildIndex()` per-person index. `autoFill(mode)` is the greedy/variance-balancing auto-scheduler. Holidays come from `FIXED_HOL` plus `holidayOverrides`, and "off days" (weekends and holidays) use `offShifts`/`needOff` instead of `weekdayShifts`/`need`.
+- **Rotation queues:** `rules.rotation = {on, start, otrn[], otpn[], hol:{senior,junior,pn}}` (staff ids in queue order). When on, `autoFill` fills public-holiday senior/junior/pn slots from the queue *before* the greedy pass and OT slots *after* it, via `applyRotation()`. A person who is next but has a problem that day is skipped and stays at the head of the queue; slots already filled (locked/manual) count as that person's turn. Assignments made this way carry `rot:true`. `monthPayload()` stores the end-of-month queue (`rotEndQueues()`, recomputed from actual assignments) as `rotQueue`, and the next month starts from the previous month's `rotQueue` (`rotPrevQueue`, set in `applyMonth`). Rescheduling a month makes the following month's queue stale until it is rescheduled. Holiday-queue days come from `isHolQueueDay()`: any run of off days that contains a public holiday, plus a single working day that bridges it to the next off-day run (and that run).
+- **Conflict rules:** `rules.conflicts = [{a:[ids], aSlot, b:[ids], bSlot, scope:'day'|'shift', note}]` (`aSlot`/`bSlot` are a `SLOTS` key or `'any'`). `problems()` flags both sides when a group-a person in `aSlot` shares the day (or shift) with a group-b person in `bSlot`, so auto-fill avoids it and manual edits show a warning.
 - **Rendering:** hand-written string-template renderers (`renderSchedule`, `renderPeople`, `renderReport`, `renderSettings`, `renderUnits`, `renderUsers`) with `renderAll()` re-rendering the active unit. There is no virtual DOM.
 - **Exports:** CSV plus PNG "paper form" exports drawn on `<canvas>` (`exportDaily`, `exportPeople`, `exportReport`), using the `PAPER` palette and the Sarabun font. The layouts imitate a specific hospital's paper roster.
 - **Undo:** `pushUndo()` snapshots the roster state (60 deep), and `addLog()` appends to the per-month change log (max 100, not recorded for nurses).

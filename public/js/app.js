@@ -17,18 +17,20 @@ function applyUnit(u){
    state.rules.weekdayShifts=noN(state.rules.weekdayShifts,['A']);state.rules.offShifts=noN(state.rules.offShifts,['M','A']);}
   state.paper=Object.assign(defaultPaper(),u.paper||{});
   state.holidayOverrides=u.holidayOverrides||{};
+  state.staffSort=u.staffSort==='manual'?'manual':'name';state.staffLocked=!!u.staffLocked;
   rawLocked={rules:u.rules||null,shifts:u.shifts||null,name:u.name||''};
 }
 function unitPayload(){
   const ce=canEditRules();
-  return JSON.parse(JSON.stringify({name:isAdmin()?state.dept:rawLocked.name,staff:state.staff,holidayOverrides:state.holidayOverrides,paper:state.paper,
+  return JSON.parse(JSON.stringify({name:isAdmin()?state.dept:rawLocked.name,staff:state.staff,holidayOverrides:state.holidayOverrides,paper:state.paper,staffSort:state.staffSort,staffLocked:!!state.staffLocked,
     rules:ce?state.rules:rawLocked.rules,shifts:ce?state.shifts:rawLocked.shifts}));
 }
 function monthPayload(){
   const mp=monthPrefix();const assign={};
   for(const k in legacyAssign)if(k.startsWith(mp)&&legacyAssign[k]&&legacyAssign[k].id)assign[k]=legacyAssign[k];
   for(const k in state.assign)if(k.startsWith(mp)&&state.assign[k]&&state.assign[k].id)assign[k]=state.assign[k];
-  return JSON.parse(JSON.stringify({assign,log:state.log.slice(0,100)}));
+  const rotQueue=rotEndQueues();
+  return JSON.parse(JSON.stringify({assign,log:state.log.slice(0,100),...(rotQueue?{rotQueue}:{})}));
 }
 const leaveJson=id=>JSON.stringify(Object.keys(state.unavail[id]||{}).filter(k=>state.unavail[id][k]).sort());
 function applyLeaves(map){
@@ -41,6 +43,7 @@ function applyMonth(data,ym,isCur){
     if(k.split('|')[1]==='N')legacyAssign[k]=data.assign[k];else state.assign[k]=data.assign[k];
   }
   if(isCur)state.log=(data&&data.log)||[];
+  if(ym===shiftYm(-1))rotPrevQueue=(data&&data.rotQueue)||null;
 }
 function setSave(st,msg){
   const el=$('#saveStatus');el.className='save '+st;
@@ -144,6 +147,11 @@ async function onAuthChanged(u){
    4) UI
    ===================================================================== */
 const $=s=>document.querySelector(s);
+const SVG=d=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICON_UP=SVG('<path d="m6 15 6-6 6 6"/>'),ICON_DN=SVG('<path d="m6 9 6 6 6-6"/>'),ICON_X=SVG('<path d="M6 6l12 12M18 6 6 18"/>');
+const ICON_GRIP='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.8"/><circle cx="15" cy="5" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="19" r="1.8"/><circle cx="15" cy="19" r="1.8"/></svg>';
+/* ปุ่มเลื่อนขึ้น/ลงแบบกะทัดรัด: attr = ชื่อ data-attribute, up/dn = ค่า, canUp/canDn = กดได้ไหม */
+const ordBtns=(attr,up,dn,canUp,canDn,dis)=>`<span class="ord"><button ${attr}="${up}" ${dis||(canUp?'':'disabled')} aria-label="เลื่อนขึ้น" title="เลื่อนขึ้น">${ICON_UP}</button><button ${attr}="${dn}" ${dis||(canDn?'':'disabled')} aria-label="เลื่อนลง" title="เลื่อนลง">${ICON_DN}</button></span>`;
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let toastT;
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),3200)}
@@ -159,7 +167,7 @@ function confirmBox(title,msg,buttons){
   openModal(title,`<p style="font-size:1.08rem;margin:0">${msg}</p>`,buttons.map((b,i)=>`<button class="btn ${b.cls||'btn-line'}" data-i="${i}">${b.label}</button>`).join(''));
   $('#mFoot').querySelectorAll('[data-i]').forEach(el=>el.onclick=()=>{closeModal();const f=buttons[+el.dataset.i].fn;if(f)f();});
 }
-function snapshot(){return JSON.stringify({assign:state.assign,unavail:state.unavail,staff:state.staff,holidayOverrides:state.holidayOverrides,rules:state.rules,shifts:state.shifts,paper:state.paper,log:state.log,dept:state.dept})}
+function snapshot(){return JSON.stringify({assign:state.assign,unavail:state.unavail,staff:state.staff,staffSort:state.staffSort,staffLocked:state.staffLocked,holidayOverrides:state.holidayOverrides,rules:state.rules,shifts:state.shifts,paper:state.paper,log:state.log,dept:state.dept})}
 function pushUndo(){undoStack.push(snapshot());if(undoStack.length>60)undoStack.shift();}
 function undo(){
   if(!undoStack.length){toast('ไม่มีรายการให้ย้อนกลับ');return}
@@ -214,7 +222,7 @@ function renderSchedule(){
     if(!shs.length){h+=`<tr class="${off?'off':''} daystart"><td class="date">${d}</td><td class="dname">${DOW_L[dow(iso)]}</td><td colspan="${1+us.length}" class="hint">ไม่มีเวร</td></tr>`;return}
     shs.forEach((sh,si)=>{
       h+=`<tr class="${off?'off':''} ${si===0?'daystart':''}">`;
-      if(si===0)h+=`<td class="date" rowspan="${shs.length}">${d}</td><td class="dname" rowspan="${shs.length}"${hn?` title="${esc(hn)}"`:''}>${DOW_L[dow(iso)]}${hn?`<small>${esc(hn)}</small>`:''}</td>`;
+      if(si===0)h+=`<td class="date" rowspan="${shs.length}">${d}</td><td class="dname" rowspan="${shs.length}"${hn?` title="${esc(hn)}"`:''}>${DOW_L[dow(iso)]}${hn?`<small>${esc(hn)}</small>`:rotOn()&&iso>=rotStart()&&isHolQueueDay(iso)?'<small>↻ คิวนักขัตฤกษ์</small>':''}</td>`;
       h+=`<td><span class="shift sh-${sh}">${esc(SHIFTS[sh].label)} <small>${esc(SHIFTS[sh].time)}</small></span></td>`;
       us.forEach(p=>{h+='<td>';const n=needFor(iso,p.key);
         if(!n)h+='<span class="hint">—</span>';
@@ -222,7 +230,7 @@ function renderSchedule(){
           const k=`${iso}|${sh}|${p.key}|${i}`;const a=state.assign[k];
           if(!a||!a.id){h+=`<button class="chip empty" data-k="${k}" ${isNurse()?'disabled':''}>${isNurse()?'ว่าง':'+ เลือกคน'}</button>`;continue;}
           const pr=isNurse()?[]:slotIssues(k,a,idx);const mine=me&&a.id===me;
-          h+=`<button class="chip ${p.cls} ${pr.length?'bad':''} ${mine?'mine':''}" data-k="${k}" ${isNurse()?'disabled':''} title="${esc(fullName(a.id)+(pr.length?' — '+pr.map(x=>x.t).join(', '):''))}">${pr.length?ICON_WARN:''}${esc(firstName(a.id))}${a.locked&&!isNurse()?ICON_LOCK:''}</button>`;
+          h+=`<button class="chip ${p.cls} ${pr.length?'bad':''} ${mine?'mine':''}" data-k="${k}" ${isNurse()?'disabled':''} title="${esc(fullName(a.id)+(pr.length?' — '+pr.map(x=>x.t).join(', '):''))}">${pr.length?ICON_WARN:''}${esc(firstName(a.id))}${a.rot&&!isNurse()?' <small title="จัดตามคิวหมุนเวร">↻</small>':''}${a.locked&&!isNurse()?ICON_LOCK:''}</button>`;
         }
         h+='</td>';});
       h+='</tr>';
@@ -240,8 +248,11 @@ function tagHtml(pr){
 function openSlot(key){
   const keys=pairKeys(key);const [iso,,slot]=key.split('|');const cur=state.assign[key];const idx=buildIndex(state.assign);const p0=parseIso(iso);
   const cands=state.staff.filter(s=>eligible(s,slot)).map(s=>{const pr=unitProblems(keys,s.id,idx);const c=monthCounts(idx,s.id);
-    return{s,pr,c,lv:pr.length?Math.max(...pr.map(p=>p.lv)):0}}).sort((a,b)=>a.lv-b.lv||(SLOTM[slot].ot?a.c.ot-b.c.ot:a.c.all-b.c.all));
+    return{s,pr,c,lv:pr.length?Math.max(...pr.map(p=>p.lv)):0}});
+  const rq=rotQueueAt(iso,slot);const qi=id=>{const i=rq?rq.indexOf(id):-1;return i<0?1e3:i};
+  cands.sort((a,b)=>a.lv-b.lv||(rq?qi(a.s.id)-qi(b.s.id):0)||(SLOTM[slot].ot?a.c.ot-b.c.ot:a.c.all-b.c.all));
   let b='';
+  if(rq)b+=`<p class="hint" style="margin-top:0">↻ ช่องนี้หมุนตามคิว — เรียงตามลำดับคิว ณ วันนี้ (คนแรก = ถึงคิว)</p>`;
   if(keys.length>1)b+=`<p class="hint" style="margin-top:0">วันหยุด: คนเดียวกันอยู่ทุกเวรของวัน — เปลี่ยน/แลกครั้งเดียวจะเปลี่ยนทั้ง ${keys.length} เวร</p>`;
   if(cur&&cur.id){const pr=slotIssues(key,cur,idx);
     b+=`<div class="curbox"><div><div class="hint">คนที่อยู่เวรนี้ตอนนี้</div><div class="who">${esc(fullName(cur.id))}</div>${pr.length?tagHtml(pr):''}</div>
@@ -287,18 +298,57 @@ function fixProblems(){
 
 /* ---------- people grid ---------- */
 function shiftsUsed(){return SH_ORDER.filter(s=>state.rules.weekdayShifts.includes(s)||state.rules.offShifts.includes(s))}
+/* ---------- ลากย้ายลำดับ/ตำแหน่งในแท็บ 2 (ใช้ pointer events จึงลากได้ทั้งเมาส์และนิ้ว) ---------- */
+function bindPeopleDrag(t){
+  const wrap=t.closest('.tbl-wrap');
+  t.querySelectorAll('[data-drag]').forEach(h=>h.onpointerdown=e=>{
+    if(e.button>0)return;e.preventDefault();
+    const id=h.dataset.drag,row=h.closest('tr');row.style.opacity='.35';document.body.style.cursor='grabbing';
+    const line=document.createElement('div');line.style.cssText='position:fixed;height:3px;background:#1C6DB0;border-radius:2px;pointer-events:none;z-index:9999;display:none';document.body.appendChild(line);
+    let drop=null,timer=null;
+    const at=(x,y)=>{const el=document.elementFromPoint(x,y);const tr=el&&el.closest('#peopleTable tr[data-sid],#peopleTable tr.grp');if(!tr){drop=null;line.style.display='none';return}
+      const r=tr.getBoundingClientRect(),w=(wrap||t).getBoundingClientRect();
+      if(tr.classList.contains('grp'))drop={tid:null,pos:tr.dataset.gpos,after:false,y:r.bottom};
+      else{const after=y>r.top+r.height/2;drop={tid:tr.dataset.sid,pos:tr.dataset.spos,after,y:after?r.bottom:r.top};}
+      Object.assign(line.style,{display:'block',left:w.left+'px',width:w.width+'px',top:(drop.y-1)+'px'});};
+    const move=ev=>{at(ev.clientX,ev.clientY);
+      clearInterval(timer);if(wrap){const w=wrap.getBoundingClientRect();const d=ev.clientY<w.top+40?-12:ev.clientY>w.bottom-40?12:0;if(d)timer=setInterval(()=>wrap.scrollBy(0,d),16);}};
+    const up=()=>{clearInterval(timer);document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',up);document.removeEventListener('pointercancel',up);
+      line.remove();row.style.opacity='';document.body.style.cursor='';if(drop)movePerson(id,drop.tid,drop.pos,drop.after);};
+    document.addEventListener('pointermove',move);document.addEventListener('pointerup',up);document.addEventListener('pointercancel',up);
+  });
+}
+function movePerson(id,tid,pos,after){
+  const p=person(id);if(!p||tid===id||!POSM[pos])return;
+  const doMove=()=>{
+    pushUndo();
+    if(state.staffSort!=='manual'){state.staff=sortStaff(state.staff);state.staffSort='manual';toast('เปลี่ยนเป็น “เรียงลำดับเอง” แล้ว');}
+    const oldPos=p.pos;const arr=state.staff.filter(s=>s.id!==id);p.pos=pos;
+    let i=tid?arr.findIndex(s=>s.id===tid)+(after?1:0):arr.findIndex(s=>s.pos===pos);if(i<0)i=arr.length;
+    arr.splice(i,0,p);state.staff=arr;
+    addLog(oldPos!==pos?`ย้าย คุณ${p.name} จาก${POSM[oldPos].label} เป็น${POSM[pos].label}`:`เลื่อนลำดับ คุณ${p.name}`);
+    markDirty();renderAll();};
+  if(pos!==p.pos)confirmBox(`ย้ายคุณ${esc(p.name)} ไปเป็น${esc(POSM[pos].label)}?`,
+    `ตำแหน่งจะเปลี่ยนจาก <b>${esc(POSM[p.pos].label)}</b> เป็น <b>${esc(POSM[pos].label)}</b> · เวรที่จัดไว้แล้วในช่องตำแหน่งเดิมจะขึ้นเตือน ให้กดจัดเวรใหม่ · ตรวจคิวหมุนเวรและกฎห้ามอยู่เวรร่วมกันของคนนี้ด้วย`,
+    [{label:'ยกเลิก'},{label:'ย้ายตำแหน่ง',cls:'btn-primary',fn:doMove}]);
+  else doMove();
+}
 function renderPeople(){
   $('#peopleLegend').innerHTML=shiftsUsed().map(s=>`<span><i class="lg" style="background:${SH_COLOR[s][0]};color:${SH_COLOR[s][1]}">${esc(SHIFTS[s].letter)}</i>เวร${esc(SHIFTS[s].label)}</span>`).join('')+
     `<span><i class="lg" style="background:#EEE8FB;color:#4A2C7A">OT</i>ล่วงเวลา</span><span><i class="lg" style="background:#E7DDF7;color:#4A2C7A">2+</i>หลายเวรในวันเดียว</span><span><i class="lg" style="background:#F7D3D3;color:#8E2020">ลา</i>ไม่ว่าง</span><span><i class="lg" style="background:var(--red);color:#fff">!</i>ไม่ว่างแต่ยังมีเวร</span>`;
   const days=monthDays();const idx=buildIndex(state.assign);const n=isNurse(),me=myStaffId();
   let h=`<thead><tr><th class="namecol">ชื่อ-สกุล</th>${days.map(iso=>`<th class="${isOff(iso)?'off':''}" title="${esc(holidayName(iso))}">${parseIso(iso).d}<small>${DOW_S[dow(iso)]}</small></th>`).join('')}<th>เวร</th><th>OT</th></tr></thead><tbody>`;
   POS.forEach(p=>{
-    const list=state.staff.filter(s=>s.pos===p.key).sort((a,b)=>(a.oc!==false)-(b.oc!==false));
-    h+=`<tr class="grp"><td colspan="${days.length+3}"><span class="dot" style="background:${p.color}"></span>${p.label} (${list.length} คน)</td></tr>`;
-    list.forEach(s=>{
+    const list=staffOf(p.key);
+    h+=`<tr class="grp" data-gpos="${p.key}"><td colspan="${days.length+3}"><span class="dot" style="background:${p.color}"></span>${p.label} (${list.length} คน)</td></tr>`;
+    list.forEach((s,li)=>{
       const c=monthCounts(idx,s.id);const mine=n&&s.id===me;const ro=n&&!mine;
-      const tag=s.oc===false?`<span class="mini">${esc(s.posLabel||(s.ot!==false?'OT เท่านั้น':'ไม่อยู่เวร'))}</span>`:(s.posLabel?`<span class="mini">${esc(s.posLabel)}</span>`:'');
-      h+=`<tr class="${mine?'merow':''}"><td class="namecol"><button class="namebtn" data-edit="${s.id}" ${n?'disabled':''}>คุณ${esc(s.name)} ${tag}${n?'':ICON_EDIT}</button></td>`;
+      const canMove=!n&&!state.staffLocked;
+      const dragH=canMove?`<span class="dragh" data-drag="${s.id}" title="ลากเพื่อย้ายลำดับ/ตำแหน่ง">${ICON_GRIP}</span>`:'';
+      const mv=canMove&&state.staffSort==='manual'?ordBtns('data-mv',s.id+'|-1',s.id+'|1',li>0,li<list.length-1):'';
+      const ns=(s.noShift||[]).filter(sh=>SHIFTS[sh]);const tag=s.oc===false?`<span class="mini">${esc(s.posLabel||(s.ot!==false?'OT เท่านั้น':'ไม่อยู่เวร'))}</span>`:
+        (s.posLabel?`<span class="mini">${esc(s.posLabel)}</span>`:'')+(ns.length?`<span class="mini">ไม่ขึ้น${esc(ns.map(sh=>SHIFTS[sh].label).join('/'))}</span>`:'')+(s.ot===false?'<span class="mini">ไม่รับ OT</span>':'');
+      h+=`<tr class="${mine?'merow':''}" data-sid="${s.id}" data-spos="${s.pos}"><td class="namecol"><div style="display:flex;align-items:center;gap:4px">${dragH}${mv}<button class="namebtn" data-edit="${s.id}" ${n?'disabled':''}>คุณ${esc(s.name)} ${tag}${n?'':ICON_EDIT}</button></div></td>`;
       days.forEach(iso=>{
         const ms=c.list.filter(x=>x.iso===iso).sort((a,b)=>SH_ORDER.indexOf(a.shift)-SH_ORDER.indexOf(b.shift));
         const una=state.unavail[s.id]&&state.unavail[s.id][iso];
@@ -314,6 +364,16 @@ function renderPeople(){
   });
   const t=$('#peopleTable');t.innerHTML=h+'</tbody>';
   t.querySelectorAll('[data-p]:not([disabled])').forEach(b=>b.onclick=()=>toggleUnavail(b.dataset.p,b.dataset.d));
+  const ss=$('#sortSel');ss.hidden=n;ss.value=state.staffSort;ss.disabled=!!state.staffLocked;
+  const lk=$('#lockOrder');lk.hidden=n;lk.textContent=state.staffLocked?'🔒 ล็อกตำแหน่งอยู่ (กดเพื่อปลด)':'🔓 ล็อกตำแหน่ง';lk.classList.toggle('btn-primary',!!state.staffLocked);lk.classList.toggle('btn-line',!state.staffLocked);
+  lk.onclick=()=>{pushUndo();state.staffLocked=!state.staffLocked;addLog(state.staffLocked?'ล็อกลำดับ/ตำแหน่งรายชื่อ':'ปลดล็อกลำดับ/ตำแหน่งรายชื่อ');markDirty();renderAll()};
+  if(!n&&!state.staffLocked)bindPeopleDrag(t);
+  ss.onchange=()=>{pushUndo();if(ss.value==='manual')state.staff=sortStaff(state.staff); // เริ่มจากลำดับที่เห็นอยู่ตอนนี้
+    state.staffSort=ss.value;addLog(ss.value==='manual'?'เปลี่ยนเป็นเรียงรายชื่อเอง':'เปลี่ยนเป็นเรียงรายชื่อตาม ก–ฮ');markDirty();renderAll()};
+  t.querySelectorAll('[data-mv]').forEach(b=>b.onclick=()=>{
+    const [id,d]=b.dataset.mv.split('|');const g=staffOf(person(id).pos);const o=g[g.findIndex(x=>x.id===id)+(+d)];if(!o)return;
+    pushUndo();const i=state.staff.findIndex(x=>x.id===id),j=state.staff.findIndex(x=>x.id===o.id);[state.staff[i],state.staff[j]]=[state.staff[j],state.staff[i]];
+    markDirty();renderAll()});
   if(!n){t.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editPerson(b.dataset.edit));
     t.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>editPerson(null,b.dataset.add));}
 }
@@ -345,20 +405,27 @@ function editPerson(id,posKey){
     <input class="textin" id="pName" value="${esc(p.name)}" placeholder="เช่น ดารารัตน์ สุขสว่าง">
     <label class="lb">ตำแหน่ง</label>
     <div class="toggles" id="pPos">${POS.map(x=>`<button class="tbtn ${x.key===p.pos?'on':''}" data-v="${x.key}">${x.label}</button>`).join('')}</div>
-    <div class="row"><label>อยู่ในเวรประจำ (OC)<small>ปิด = ไม่จัดเวร OC ให้ เช่น หัวหน้า, Sup., หรือคนที่มาช่วยเฉพาะ OT</small></label><button class="switch ${p.oc!==false?'on':''}" id="pOc"></button></div>
-    <div class="row"><label>รับ OT ได้<small>ระบบจะเลือกคนนี้ลงช่อง OT RN / OT PN</small></label><button class="switch ${p.ot!==false?'on':''}" id="pOt"></button></div>
+    <label class="lb">ขึ้นเวรอะไรได้บ้าง</label>
+    <div class="toggles" id="pDuty">${SH_ORDER.map(sh=>`<button class="tbtn ${p.oc!==false&&!(p.noShift||[]).includes(sh)?'on':''}" data-v="${sh}">เวร${esc(SHIFTS[sh].label)}</button>`).join('')}<button class="tbtn ${p.ot!==false?'on':''}" data-v="OT">OT</button></div>
+    <p class="hint" id="pDutyHint" style="margin:6px 0 0"></p>
     <label class="lb">ตำแหน่งที่แสดงในใบลงเวลา (ไม่บังคับ)</label>
     <input class="textin" id="pLabel" value="${esc(p.posLabel||'')}" placeholder="เว้นว่าง = RN / PN · หรือใส่ เช่น CO, Sup., CLA">`,
     `${id?'<button class="btn btn-danger" id="pDel">ลบคนนี้</button>':''}<button class="btn btn-line" data-close>ยกเลิก</button><button class="btn btn-primary" id="pSave">บันทึก</button>`);
-  let pos=p.pos,pre=p.prefix||'น.ส.',oc=p.oc!==false,ot=p.ot!==false;
+  let pos=p.pos,pre=p.prefix||'น.ส.';
+  const duty=new Set([...SH_ORDER.filter(sh=>p.oc!==false&&!(p.noShift||[]).includes(sh)),...(p.ot!==false?['OT']:[])]);
+  const dutyHint=()=>{const reg=SH_ORDER.filter(sh=>duty.has(sh));$('#pDutyHint').textContent=
+    !reg.length&&duty.has('OT')?'ขึ้น OT อย่างเดียว — ไม่จัดเวรเช้า/เย็นให้':!reg.length?'ไม่จัดเวรใด ๆ ให้ (เช่น หัวหน้า, Sup.)':
+    reg.length<SH_ORDER.length?`จัดให้เฉพาะเวร${reg.map(sh=>SHIFTS[sh].label).join(', ')}${duty.has('OT')?' และ OT':''}`:duty.has('OT')?'ขึ้นได้ทุกเวรและ OT':'ขึ้นได้ทุกเวร แต่ไม่รับ OT';};
+  $('#pDuty').querySelectorAll('.tbtn').forEach(b=>b.onclick=()=>{const v=b.dataset.v;duty.has(v)?duty.delete(v):duty.add(v);b.classList.toggle('on',duty.has(v));dutyHint()});dutyHint();
   const grp=(sel,set)=>$(sel).querySelectorAll('.tbtn').forEach(b=>b.onclick=()=>{set(b.dataset.v);$(sel).querySelectorAll('.tbtn').forEach(x=>x.classList.toggle('on',x===b))});
   grp('#pPos',v=>pos=v);grp('#pPre',v=>pre=v);
-  $('#pOc').onclick=()=>{oc=!oc;$('#pOc').classList.toggle('on',oc)};$('#pOt').onclick=()=>{ot=!ot;$('#pOt').classList.toggle('on',ot)};
   $('#pName').focus();
   $('#pSave').onclick=()=>{
     const nm=$('#pName').value.trim().replace(/^(คุณ|น\.ส\.|นางสาว|นาง|นาย)\s*/,'');if(!nm){toast('กรุณาใส่ชื่อ');return}
-    pushUndo();const v={name:nm,pos,prefix:pre,oc,ot,posLabel:$('#pLabel').value.trim()};
-    if(id){const old=person(id);Object.assign(old,v);for(const k in state.assign)if(state.assign[k]&&state.assign[k].id===id&&!eligible(old,k.split('|')[2]))delete state.assign[k];addLog('แก้ไขข้อมูล คุณ'+nm);}
+    const reg=SH_ORDER.filter(sh=>duty.has(sh));const oc=reg.length>0,ot=duty.has('OT');const noShift=oc?SH_ORDER.filter(sh=>!duty.has(sh)):[];
+    pushUndo();const v={name:nm,pos,prefix:pre,oc,ot,noShift,posLabel:$('#pLabel').value.trim()};
+    if(id){const old=person(id);Object.assign(old,v);for(const k in state.assign){const [,sh,sl]=k.split('|');
+      if(state.assign[k]&&state.assign[k].id===id&&(!eligible(old,sl)||(!SLOTM[sl].ot&&noShift.includes(sh))))delete state.assign[k];}addLog('แก้ไขข้อมูล คุณ'+nm);}
     else{state.staff.push(Object.assign({id:'x'+Date.now().toString(36)},v));addLog('เพิ่ม คุณ'+nm+' ('+POSM[pos].label+')');}
     markDirty();closeModal();renderAll();
   };
@@ -375,7 +442,7 @@ function reportCols(){
 }
 function reportRows(){
   const idx=buildIndex(state.assign);const mp=monthPrefix();const cols=reportCols();
-  return POS.map(p=>({p,rows:state.staff.filter(s=>s.pos===p.key).map(s=>{
+  return POS.map(p=>({p,rows:staffOf(p.key).map(s=>{
     const l=monthCounts(idx,s.id).list;const oc=l.filter(x=>!x.ot);
     return{s,hist:(HIST[s.id]||{all:0}).all,est:!!(HIST[s.id]&&HIST[s.id].est),per:cols.map(c=>oc.filter(x=>x.off===c.off&&x.shift===c.s).length),total:oc.length,ot:l.length-oc.length,days:new Set(l.map(x=>x.iso)).size,
       hours:Math.round(oc.reduce((a,x)=>a+hoursOf(x.shift),0)*10)/10,
@@ -423,6 +490,8 @@ function renderSettings(){
     <div class="row"><label>จำนวนเวรสูงสุดต่อคน/เดือน<small>0 = ไม่จำกัด · ไม่นับ OT</small></label>${stepper('maxPer',r.maxPer,dis)}</div>
     <div class="row"><label>เวรวันหยุดสูงสุดต่อคน/เดือน<small>0 = ไม่จำกัด</small></label>${stepper('maxOffPer',r.maxOffPer,dis)}</div>
   </div>
+  ${conflictCard(dis)}
+  ${rotationCard(dis)}
   <div class="card"><h3>รูปแบบเวรของแผนกนี้</h3>
     <div class="row" style="display:block"><label>วันธรรมดา (จ–ศ) มีเวร</label>${tog('weekdayShifts')}</div>
     <div class="row" style="display:block"><label>เสาร์ อาทิตย์ และวันนักขัตฤกษ์ มีเวร</label>${tog('offShifts')}</div>
@@ -461,8 +530,82 @@ function renderSettings(){
     $('#holName').focus();
     $('#holOk').onclick=()=>{pushUndo();state.holidayOverrides[iso]=$('#holName').value.trim()||'วันหยุด';addLog('เพิ่มวันหยุด '+shortDate(iso));markDirty();closeModal();renderAll();};
   });
+  bindRotationCard(Bx);bindConflictCard(Bx);
   const di=$('#deptIn');if(di)di.onchange=()=>{state.dept=di.value.trim()||state.dept;markDirty();renderHeader()};
   const du=$('#delUnitBtn');if(du)du.onclick=()=>deleteUnit(unitId,state.dept);
+}
+/* ---------- การ์ดคิวหมุนเวร ---------- */
+function rotList(kind,create){
+  const r=state.rules;
+  if(!r.rotation){if(!create)return [];r.rotation={on:false,start:'',otrn:[],otpn:[],hol:{senior:[],junior:[],pn:[]}};}
+  const R=r.rotation;if(kind.hol){R.hol=R.hol||{};return R.hol[kind.slot]=R.hol[kind.slot]||[];}
+  return R[kind.slot]=R[kind.slot]||[];
+}
+function rotationCard(dis){
+  const R=state.rules.rotation||{};const on=!!R.on;
+  const lists=ROT_KINDS.map((kind,ki)=>{
+    const list=rotList(kind);const next=on?rotStartQueue(kind).slice(0,3):[];
+    const rest=state.staff.filter(s=>eligible(s,kind.slot)&&!list.includes(s.id));
+    if(!list.length){const def=rotDefault(kind);
+      return `<details class="rotk" style="margin-top:8px"><summary><b>${esc(kind.label)}</b> <span class="hint">(ยังไม่ได้ตั้งลำดับ · ใช้ลำดับรายชื่อ ${def.length} คน)</span></summary>
+        ${def.length?`<p class="hint" style="margin:6px 0">ระบบใช้ลำดับตามรายชื่อในแผนก: ${def.map(id=>esc(firstName(id))).join(' → ')}</p>
+        ${dis?'':`<button class="btn btn-line" data-rfill="${ki}">ใส่ทั้ง ${def.length} คนลงคิว เพื่อเรียงลำดับเอง</button>`}`
+        :`<p class="hint" style="margin:6px 0">ยังไม่มีคนที่${kind.hol?'อยู่เวรประจำตำแหน่งนี้':'รับ OT ตำแหน่งนี้ได้'} — เพิ่มรายชื่อ หรือเปิด “${kind.hol?'อยู่ในเวรประจำ (OC)':'รับ OT ได้'}” ที่ชื่อคนในแท็บ 2</p>`}</details>`;}
+    return `<details class="rotk" style="margin-top:8px"><summary><b>${esc(kind.label)}</b> <span class="hint">(${list.length} คน${next.length?` · ต้นเดือนนี้เริ่มที่ ${next.map(id=>esc(firstName(id))).join(' → ')}`:''})</span></summary>
+      <div style="margin:6px 0">${list.map((id,i)=>`<div class="rotrow"><span class="no">${i+1}.</span><span class="nm">${esc(person(id)?person(id).name:'(ไม่พบชื่อ)')}</span>
+        ${ordBtns('data-rmv',`${ki}|${i}|-1`,`${ki}|${i}|1`,i>0,i<list.length-1,dis)}<button class="icox" data-rdel="${ki}|${i}" ${dis} aria-label="เอาออกจากคิว" title="เอาออกจากคิว">${ICON_X}</button></div>`).join('')}</div>
+      ${rest.length&&!dis?`<select class="textin" data-radd="${ki}"><option value="">+ เพิ่มคนท้ายคิว</option>${rest.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>`:''}</details>`}).join('');
+  return `<div class="card"><h3>คิวหมุนเวร</h3><p class="hint">เปิดแล้ว ปุ่มจัดอัตโนมัติจะจัด <b>OT</b> และ <b>เวรประจำวันนักขัตฤกษ์</b> ตามลำดับคิว (วันละ 1 คนต่อช่อง) · คิวนักขัตฤกษ์รวมเสาร์-อาทิตย์ที่ติดกับวันนักขัตฤกษ์ และถ้าห่างกันแค่ 1 วันทำงาน วันทำงานที่คั่นกับเสาร์-อาทิตย์นั้นก็เข้าคิวด้วย · คนที่ถึงคิวแต่ลา/ติดเวรวันนั้นจะถูกข้าม และได้วันถัดไปแทน · คิวต่อจากเดือนก่อนอัตโนมัติ · ช่องที่แก้มือนับว่าคนนั้นใช้คิวแล้ว</p>
+    <div class="row"><label>ใช้คิวหมุนเวร<small>ปิด = ระบบเกลี่ยจำนวนเวรเหมือนเดิม</small></label><button class="switch ${on?'on':''}" id="rotOn" aria-label="เปิด/ปิด" ${dis}></button></div>
+    <div class="row"><label>เริ่มหมุนตั้งแต่วันที่<small>ก่อนวันนี้ระบบจัดแบบเดิม</small></label><input type="date" class="textin" id="rotStartIn" style="max-width:180px" value="${esc(R.start||'')}" ${dis}></div>
+    ${lists}</div>`;
+}
+function bindRotationCard(Bx){
+  const ch=()=>{addLog('แก้คิวหมุนเวร');markDirty();renderAll()};
+  const ro=$('#rotOn');if(ro)ro.onclick=()=>{pushUndo();rotList(ROT_KINDS[0],true);state.rules.rotation.on=!state.rules.rotation.on;ch()};
+  const rs=$('#rotStartIn');if(rs)rs.onchange=()=>{pushUndo();rotList(ROT_KINDS[0],true);state.rules.rotation.start=rs.value;ch()};
+  Bx.querySelectorAll('[data-rmv]').forEach(b=>b.onclick=()=>{const [ki,i,d]=b.dataset.rmv.split('|').map(Number);pushUndo();const l=rotList(ROT_KINDS[ki],true);[l[i],l[i+d]]=[l[i+d],l[i]];ch()});
+  Bx.querySelectorAll('[data-rdel]').forEach(b=>b.onclick=()=>{const [ki,i]=b.dataset.rdel.split('|').map(Number);pushUndo();rotList(ROT_KINDS[ki],true).splice(i,1);ch()});
+  Bx.querySelectorAll('[data-rfill]').forEach(b=>b.onclick=()=>{const kind=ROT_KINDS[+b.dataset.rfill];pushUndo();const l=rotList(kind,true);l.push(...rotDefault(kind).filter(id=>!l.includes(id)));ch()});
+  Bx.querySelectorAll('[data-radd]').forEach(s=>s.onchange=()=>{if(!s.value)return;pushUndo();rotList(ROT_KINDS[+s.dataset.radd],true).push(s.value);ch()});
+  // คงสถานะเปิด/ปิดของรายการคิวหลัง render ใหม่
+  Bx.querySelectorAll('details.rotk').forEach((d,i)=>{d.open=!!(window.__rotOpen||{})[i];d.ontoggle=()=>{(window.__rotOpen=window.__rotOpen||{})[i]=d.open}});
+}
+/* ---------- การ์ดกฎห้ามอยู่เวรร่วมกัน (rules.conflicts) ---------- */
+const slotName=s=>s==='any'?'ช่องใดก็ได้':'ช่อง '+SLOTM[s].short;
+const namesOf=ids=>(ids||[]).map(id=>person(id)?firstName(id):'(ไม่พบชื่อ)').join(', ')||'—';
+function conflictCard(dis){
+  const cs=state.rules.conflicts||[];
+  return `<div class="card"><h3>กฎห้ามอยู่เวรร่วมกัน</h3><p class="hint">เช่น คนที่เพิ่งย้ายมาตำแหน่งใหม่ ห้ามอยู่วันเดียวกับคนใหม่อีกคน · ระบบจัดอัตโนมัติจะหลีกเลี่ยง และขึ้นเตือนถ้าแก้มือแล้วผิดกฎ</p>
+    ${cs.length?`<ol style="margin:6px 0 10px 18px;padding:0">${cs.map((c,i)=>`<li style="margin:6px 0"><b>${esc(namesOf(c.a))}</b> <span class="hint">(${slotName(c.aSlot||'any')})</span>
+      ห้ามอยู่${c.scope==='shift'?'เวรเดียวกัน':'วันเดียวกัน'}กับ <b>${esc(namesOf(c.b))}</b> <span class="hint">(${slotName(c.bSlot||'any')})</span>${c.note?` <span class="hint">· ${esc(c.note)}</span>`:''}
+      <button class="btn btn-line" style="padding:0 8px" data-cedit="${i}" ${dis}>แก้</button><button class="icox" style="vertical-align:middle" data-cdel="${i}" ${dis} aria-label="ลบกฎ" title="ลบกฎ">${ICON_X}</button></li>`).join('')}</ol>`:'<p class="hint">ยังไม่มีกฎ</p>'}
+    <button class="btn btn-primary" id="addConflict" ${dis}>+ เพิ่มกฎ</button></div>`;
+}
+function openConflict(i){
+  const cs=state.rules.conflicts||[];const c=i==null?{a:[],aSlot:'any',b:[],bSlot:'any',scope:'day',note:''}:cs[i];
+  const slotSel=(id,v)=>`<select class="textin" id="${id}"><option value="any">ช่องใดก็ได้</option>${SLOTS.map(s=>`<option value="${s.key}" ${v===s.key?'selected':''}>${esc(s.short)} — ${esc(s.label)}</option>`).join('')}</select>`;
+  const checks=(g,sel)=>`<div class="cands" style="max-height:220px;overflow:auto">${POS.map(p=>{const l=staffOf(p.key);return l.length?`<div class="hint" style="margin-top:6px">${esc(p.label)}</div>`+l.map(s=>`<label style="display:block;padding:2px 0"><input type="checkbox" data-g="${g}" value="${s.id}" ${sel.includes(s.id)?'checked':''}> ${esc(s.name)}</label>`).join(''):''}).join('')}</div>`;
+  openModal(i==null?'เพิ่มกฎห้ามอยู่เวรร่วมกัน':'แก้กฎห้ามอยู่เวรร่วมกัน',`
+    <label class="lb" style="margin-top:0">กลุ่มที่ 1 — เลือกชื่อ</label>${checks('a',c.a||[])}
+    <label class="lb">กลุ่มที่ 1 อยู่ในช่อง</label>${slotSel('cfASlot',c.aSlot||'any')}
+    <label class="lb">ห้ามอยู่</label><select class="textin" id="cfScope"><option value="day">วันเดียวกัน</option><option value="shift" ${c.scope==='shift'?'selected':''}>เวรเดียวกัน (เช้า/เย็น เดียวกัน)</option></select>
+    <label class="lb">กับกลุ่มที่ 2 — เลือกชื่อ</label>${checks('b',c.b||[])}
+    <label class="lb">กลุ่มที่ 2 อยู่ในช่อง</label>${slotSel('cfBSlot',c.bSlot||'any')}
+    <label class="lb">หมายเหตุ (ไม่บังคับ)</label><input class="textin" id="cfNote" value="${esc(c.note||'')}" placeholder="เช่น เพิ่งย้ายมาตำแหน่ง Senior">`,
+    `<button class="btn btn-line" data-close>ยกเลิก</button><button class="btn btn-primary" id="cfOk">บันทึกกฎ</button>`);
+  $('#cfOk').onclick=()=>{
+    const pick=g=>[...document.querySelectorAll(`#mBody input[data-g="${g}"]:checked`)].map(x=>x.value);
+    const v={a:pick('a'),aSlot:$('#cfASlot').value,b:pick('b'),bSlot:$('#cfBSlot').value,scope:$('#cfScope').value,note:$('#cfNote').value.trim()};
+    if(!v.a.length||!v.b.length){toast('เลือกชื่ออย่างน้อย 1 คนในแต่ละกลุ่ม');return}
+    pushUndo();state.rules.conflicts=cs.slice();if(i==null)state.rules.conflicts.push(v);else state.rules.conflicts[i]=v;
+    addLog('แก้กฎห้ามอยู่เวรร่วมกัน');markDirty();closeModal();renderAll();toast('บันทึกกฎแล้ว — กดจัดเวรอัตโนมัติใหม่เพื่อใช้กฎนี้');
+  };
+}
+function bindConflictCard(Bx){
+  const ab=$('#addConflict');if(ab)ab.onclick=()=>openConflict(null);
+  Bx.querySelectorAll('[data-cedit]').forEach(b=>b.onclick=()=>openConflict(+b.dataset.cedit));
+  Bx.querySelectorAll('[data-cdel]').forEach(b=>b.onclick=()=>{pushUndo();state.rules.conflicts=(state.rules.conflicts||[]).filter((_,i)=>i!==+b.dataset.cdel);addLog('ลบกฎห้ามอยู่เวรร่วมกัน');markDirty();renderAll()});
 }
 function deleteUnit(id,name){
   confirmBox('ลบแผนก '+esc(name)+'?','รายชื่อ กฎ และตารางเวรทั้งหมดของแผนกนี้จะเข้าถึงไม่ได้อีก และบัญชีที่ผูกกับแผนกนี้จะเข้าระบบไม่ได้จนกว่าจะผูกแผนกใหม่ — ย้อนกลับไม่ได้',[
@@ -508,7 +651,7 @@ function addUnit(units){
   openModal('เพิ่มแผนกใหม่',`
     <label class="lb" style="margin-top:0">ชื่อแผนก</label><input class="textin" id="nuName" placeholder="เช่น หอผู้ป่วยศัลยกรรมชาย">
     <label class="lb">กฎและรูปแบบเวร</label>
-    <select class="textin" id="nuCopy"><option value="">ใช้ค่าเริ่มต้น</option>${units.map(u=>`<option value="${esc(u.id)}">คัดลอกจาก ${esc(u.name)}</option>`).join('')}</select>
+    <select class="textin" id="nuCopy"><option value="">ใช้ค่าเริ่มต้น</option><option value="preset2570">${esc(PRESET_2570.label)}</option>${units.map(u=>`<option value="${esc(u.id)}">คัดลอกจาก ${esc(u.name)}</option>`).join('')}</select>
     <p class="hint">สร้างเสร็จแล้วไปเพิ่มรายชื่อและแก้กฎได้ในแผนกนั้น</p>`,
     `<button class="btn btn-line" data-close>ยกเลิก</button><button class="btn btn-primary" id="nuOk">สร้างแผนก</button>`);
   $('#nuName').focus();
@@ -516,6 +659,7 @@ function addUnit(units){
     const name=$('#nuName').value.trim();if(!name){toast('กรุณาใส่ชื่อแผนก');return}
     const src=units.find(u=>u.id===$('#nuCopy').value);const id='u'+Date.now().toString(36);
     const data={name,staff:[],rules:src?src.rules:defaultRules(),shifts:src?src.shifts:defaultShifts(),paper:src&&src.paper?src.paper:defaultPaper(),holidayOverrides:{},updatedAt:Date.now(),updatedBy:session.user.email};
+    if($('#nuCopy').value==='preset2570')Object.assign(data,buildPreset2570());
     try{await B.saveUnit(id,JSON.parse(JSON.stringify(data)));closeModal();toast('สร้างแผนก '+name+' แล้ว');openUnit(id);}catch(e){toast('สร้างไม่สำเร็จ: '+(e.code||e.message))}
   };
 }
@@ -614,6 +758,8 @@ async function purgeStaff(idList,label){
   clearTimeout(saveTimer);saveTimer=null;
   const before=snapshot(),beforeLegacy=JSON.stringify(legacyAssign),beforeLastLeave={...lastLeave};
   state.staff=state.staff.filter(s=>!ids.has(s.id));
+  if(state.rules.rotation)ROT_KINDS.forEach(kind=>{const l=rotList(kind,true);l.splice(0,l.length,...l.filter(id=>!ids.has(id)))});
+  if(state.rules.conflicts)state.rules.conflicts=state.rules.conflicts.map(c=>({...c,a:c.a.filter(id=>!ids.has(id)),b:c.b.filter(id=>!ids.has(id))})).filter(c=>c.a.length&&c.b.length);
   for(const k in state.assign)if(state.assign[k]&&ids.has(state.assign[k].id))delete state.assign[k];
   for(const k in legacyAssign)if(legacyAssign[k]&&ids.has(legacyAssign[k].id))delete legacyAssign[k];
   ids.forEach(id=>{delete state.unavail[id];delete lastLeave[id]});
@@ -657,8 +803,61 @@ $('#pngDailyBtn').onclick=exportDaily;
 $('#pngPeopleBtn').onclick=exportPeople;
 $('#pngReportBtn').onclick=exportReport;
 $('#csvBtn').onclick=exportCSV;
+$('#holTableBtn').onclick=()=>openHolidayTable(state.year);
+
+/* ---------- ตารางเวรนักขัตฤกษ์ทั้งปี ----------
+   ทุกวันที่เข้าคิวนักขัตฤกษ์ (isHolQueueDay) ของปี: วันที่จัดแล้วแสดงชื่อจริง,
+   วันที่ยังไม่จัดแสดงชื่อตามคิว (คาดการณ์) โดยเดินคิวตั้งแต่วันเริ่มหมุนเหมือน applyRotation */
+const HOL_COLS=[{pos:'senior',h:'RN Senior'},{pos:'junior',h:'RN Junior'},{pos:'pn',h:'PN'}];
+async function holidayTableRows(year){
+  let months={};try{months=await B.listMonths(unitId)}catch(e){console.error(e)}
+  const asg={};for(const ym in months){const a=(months[ym]&&months[ym].assign)||{};for(const k in a)if(a[k]&&a[k].id)asg[k]=a[k];}
+  for(const k in asg)if(k.startsWith(monthPrefix())||k.startsWith(shiftYm(-1))||k.startsWith(shiftYm(1)))delete asg[k];
+  for(const k in state.assign)if(state.assign[k]&&state.assign[k].id)asg[k]=state.assign[k]; // ใช้ข้อมูลล่าสุดในหน้าจอ
+  const idsOn=(iso,pos)=>{const out=[];shiftsOf(iso).forEach(sh=>{for(let i=0;i<needFor(iso,pos);i++){const a=asg[`${iso}|${sh}|${pos}|${i}`];if(a&&a.id&&!out.includes(a.id))out.push(a.id)}});return out};
+  const rot=rotOn(),first=`${year}-01-01`,last=`${year}-12-31`;
+  let d=rot&&rotStart()&&rotStart()<first?rotStart():first;
+  const q={};HOL_COLS.forEach(c=>q[c.pos]=rot?rotOrder(ROT_KINDS.find(k=>k.hol&&k.slot===c.pos)):[]);
+  const rows=[];
+  for(;d<=last;d=addDays(d,1)){
+    if(!isHolQueueDay(d))continue;const inRot=rot&&d>=rotStart();
+    const cells=HOL_COLS.map(c=>{
+      const n=needFor(d,c.pos);if(!n)return{names:[],fc:false};
+      let ids=idsOn(d,c.pos),fc=false;
+      if(!ids.length&&inRot){ids=[];for(let i=0;i<n;i++){const id=q[c.pos].find(x=>!ids.includes(x)&&eligible(person(x),c.pos)&&!(state.unavail[x]&&state.unavail[x][d]));if(id)ids.push(id)}fc=ids.length>0;}
+      if(inRot)ids.forEach(id=>{const j=q[c.pos].indexOf(id);if(j>=0){q[c.pos].splice(j,1);q[c.pos].push(id)}});
+      return{names:ids.map(firstName),fc};});
+    if(d>=first)rows.push({iso:d,hol:holidayName(d)||(isWeekend(d)?'เสาร์-อาทิตย์ติดวันหยุด':'วันทำงานคั่นวันหยุด'),real:!!holidayName(d),cells});
+  }
+  return rows;
+}
+const thDate=iso=>{const p=parseIso(iso);return `${p.d} ${TH_MS[p.m]} ${be(p.y)}`};
+async function openHolidayTable(year){
+  openModal(`ตารางเวรนักขัตฤกษ์ ปี ${be(year)}`,'<p class="hint">กำลังโหลด…</p>');
+  const rows=await holidayTableRows(year);
+  const anyFc=rows.some(r=>r.cells.some(c=>c.fc));
+  const body=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><button class="btn btn-line" id="hyPrev" aria-label="ปีก่อน">‹ ${be(year-1)}</button><b style="flex:1;text-align:center">${esc(state.dept)} · ปี ${be(year)} · ${rows.length} วัน</b><button class="btn btn-line" id="hyNext" aria-label="ปีถัดไป">${be(year+1)} ›</button></div>
+    ${anyFc?'<p class="hint" style="margin:0 0 8px">ชื่อ<i style="color:#8a94a6">ตัวเอียงสีเทา</i> = ยังไม่ได้จัดเวรเดือนนั้น แสดงตามลำดับคิว (คาดการณ์) · ตัวปกติ = จัดในตารางแล้ว</p>':''}
+    ${rows.length?`<div class="tbl-wrap" style="max-height:60vh"><table class="sched rep"><thead><tr><th class="n">ลำดับ</th><th>วัน</th><th>ว/ด/ป</th><th>นักขัตฤกษ์</th>${HOL_COLS.map(c=>`<th>${c.h}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map((r,i)=>`<tr class="off"><td class="n">${i+1}</td><td>${DOW_L[dow(r.iso)]}</td><td style="white-space:nowrap">${thDate(r.iso)}</td><td>${r.real?esc(r.hol):`<span class="hint">${esc(r.hol)}</span>`}</td>
+      ${r.cells.map(c=>`<td>${c.names.length?(c.fc?`<i style="color:#8a94a6">${esc(c.names.join(', '))}</i>`:esc(c.names.join(', '))):'<span class="hint">—</span>'}</td>`).join('')}</tr>`).join('')}
+    </tbody></table></div>`:'<p class="hint">ไม่มีวันนักขัตฤกษ์ในปีนี้</p>'}`;
+  openModal(`ตารางเวรนักขัตฤกษ์ ปี ${be(year)}`,body,`<button class="btn btn-line" id="hyCsv">ดาวน์โหลด Excel (CSV)</button><button class="btn btn-line" id="hyPrint">พิมพ์</button><button class="btn btn-primary" data-close>ปิด</button>`);
+  $('#hyPrev').onclick=()=>openHolidayTable(year-1);$('#hyNext').onclick=()=>openHolidayTable(year+1);
+  const flat=r=>[DOW_L[dow(r.iso)],thDate(r.iso),r.hol,...r.cells.map(c=>c.names.join(', ')+(c.fc?' (คาดการณ์)':''))];
+  $('#hyCsv').onclick=()=>{const lines=[[`ตารางเวรนักขัตฤกษ์ ${state.dept} ปี ${be(year)}`],['ลำดับ','วัน','ว/ด/ป','นักขัตฤกษ์',...HOL_COLS.map(c=>c.h)],...rows.map((r,i)=>[i+1,...flat(r)])];
+    downloadBlob(new Blob(['﻿'+lines.map(l=>l.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n')],{type:'text/csv'}),`เวรนักขัตฤกษ์-${state.dept.replace(/[\\/:*?"<>|\s]+/g,'_')}-${be(year)}.csv`);toast('ดาวน์โหลดไฟล์แล้ว')};
+  $('#hyPrint').onclick=()=>{const w=window.open('','_blank');if(!w){toast('เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาต pop-up แล้วลองอีกครั้ง');return}
+    w.document.write(`<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ตารางเวรนักขัตฤกษ์ ${be(year)}</title><style>body{font-family:${FONT};padding:24px}h2{margin:0 0 4px}table{border-collapse:collapse;width:100%;font-size:14px}th,td{border:1px solid #000;padding:6px 8px;text-align:left}th{background:#F4B084}td.n,th.n{text-align:center}i{color:#666}</style></head><body>
+      <h2>ตารางเวรนักขัตฤกษ์ ปี ${be(year)}</h2><div style="margin-bottom:12px">${esc(state.dept)}</div>
+      <table><thead><tr><th class="n">ลำดับ</th><th>วัน</th><th>ว/ด/ป</th><th>นักขัตฤกษ์</th>${HOL_COLS.map(c=>`<th>${c.h}</th>`).join('')}</tr></thead><tbody>
+      ${rows.map((r,i)=>`<tr><td class="n">${i+1}</td><td>${DOW_L[dow(r.iso)]}</td><td>${thDate(r.iso)}</td><td>${esc(r.hol)}</td>${r.cells.map(c=>`<td>${c.fc?'<i>':''}${esc(c.names.join(', '))}${c.fc?'</i>':''}</td>`).join('')}</tr>`).join('')}
+      </tbody></table>${anyFc?'<p><i>ตัวเอียง = คาดการณ์ตามคิว ยังไม่ได้จัดในตาราง</i></p>':''}</body></html>`);
+    w.document.close();w.focus();setTimeout(()=>w.print(),300);};
+}
 function runAuto(mode){pushUndo();const un=autoFill(mode);addLog(`จัดเวรอัตโนมัติ ${monthTitle()}${mode==='keepLocked'?' (คงช่องที่ล็อกไว้)':''}`);markDirty();renderAll();
-  toast(un?`จัดแล้ว แต่มี ${un} ช่องที่หาคนว่างไม่ได้ — ลองปิดกฎบางข้อในแท็บ 4`:'จัดเวรครบทุกช่องแล้ว');}
+  const nx=shiftYm(1);const nextDone=rotOn()&&Object.keys(state.assign).some(k=>k.startsWith(nx)&&state.assign[k]&&state.assign[k].id);
+  toast((un?`จัดแล้ว แต่มี ${un} ช่องที่หาคนว่างไม่ได้ — ลองปิดกฎบางข้อในแท็บ 4`:'จัดเวรครบทุกช่องแล้ว')+(nextDone?' · เดือนถัดไปจัดไว้แล้ว คิวหมุนเวรอาจไม่ต่อเนื่อง ควรจัดเดือนถัดไปใหม่':''));}
 $('#autoBtn').onclick=()=>{
   const mk=monthSlots().map(s=>s.key);const has=mk.filter(k=>state.assign[k]&&state.assign[k].id);const locked=has.filter(k=>state.assign[k].locked).length;
   if(!has.length){runAuto('all');return}
