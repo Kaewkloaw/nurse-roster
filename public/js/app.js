@@ -197,7 +197,17 @@ function allProblems(){
   return{out,filled,total:slots.length,idx};
 }
 const okIcon='<div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="m5 12 5 5 9-10"/></svg></div>';
+/* แถบเตือนเหนือตารางเวร เมื่อแผนกนี้ยังไม่ได้ตั้งคิวตามหลักเกณฑ์ปี 2570 */
+function renderRotBanner(){
+  const el=$('#rotBanner');if(!el)return;
+  const iss=isNurse()||!canEditRules()?[]:preset2570Issues();
+  el.innerHTML=iss.length?`<div class="status warn" style="margin-bottom:12px;display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+    <div class="txt" style="flex:1;min-width:240px"><b>คิวหมุนเวรยังไม่ตรงหลักเกณฑ์ปี 2570</b><div class="hint">${iss.map(esc).join(' · ')}</div></div>
+    <button class="btn btn-primary" id="rotBannerBtn">ตั้งคิวตามหลักเกณฑ์ 2570</button></div>`:'';
+  const b=$('#rotBannerBtn');if(b)b.onclick=applyPreset2570ToUnit;
+}
 function renderSchedule(){
+  renderRotBanner();
   const {out,filled,total,idx}=allProblems();const sb=$('#statusBox');
   if(isNurse()){
     const me=myStaffId();const c=monthCounts(idx,me);
@@ -289,6 +299,14 @@ function openSlot(key){
       markDirty();closeModal();renderAll();toast('แลกเวรเรียบร้อย');
     });
   };
+}
+/* เติมช่องที่ว่างของเดือนนี้ (เช่น หลังเอาคนออกจากเวรเพราะเปลี่ยนเป็น OT อย่างเดียว) — ทำเฉพาะเดือนที่จัดไว้แล้ว
+   ใช้ autoFill('fix'): คงเวรเดิมที่ไม่ผิดกฎไว้ แล้วหาคนลงช่องว่าง/ช่องที่ผิดกฎ · คืนค่าจำนวนช่องที่เติมได้ */
+function refillEmpty(){
+  const ks=monthSlots().map(s=>s.key);const filled=ks.filter(k=>state.assign[k]&&state.assign[k].id).length;const empty=ks.length-filled;
+  if(!filled||!empty)return 0;
+  autoFill('fix');const after=ks.filter(k=>!(state.assign[k]&&state.assign[k].id)).length;
+  return empty-after;
 }
 function fixProblems(){
   pushUndo();const before=allProblems().out.length;const un=autoFill('fix');
@@ -425,7 +443,7 @@ function editPerson(id,posKey){
     const reg=SH_ORDER.filter(sh=>duty.has(sh));const oc=reg.length>0,ot=duty.has('OT');const noShift=oc?SH_ORDER.filter(sh=>!duty.has(sh)):[];
     pushUndo();const v={name:nm,pos,prefix:pre,oc,ot,noShift,posLabel:$('#pLabel').value.trim()};
     if(id){const old=person(id);Object.assign(old,v);for(const k in state.assign){const [,sh,sl]=k.split('|');
-      if(state.assign[k]&&state.assign[k].id===id&&(!eligible(old,sl)||(!SLOTM[sl].ot&&noShift.includes(sh))))delete state.assign[k];}addLog('แก้ไขข้อมูล คุณ'+nm);}
+      if(state.assign[k]&&state.assign[k].id===id&&(!eligible(old,sl)||(!SLOTM[sl].ot&&noShift.includes(sh))))delete state.assign[k];}addLog('แก้ไขข้อมูล คุณ'+nm);const nf=refillEmpty();if(nf)toast(`หาคนแทนในเวรที่ว่างให้แล้ว ${nf} ช่อง`);}
     else{state.staff.push(Object.assign({id:'x'+Date.now().toString(36)},v));addLog('เพิ่ม คุณ'+nm+' ('+POSM[pos].label+')');}
     markDirty();closeModal();renderAll();
   };
@@ -556,6 +574,7 @@ function rotationCard(dis){
         ${ordBtns('data-rmv',`${ki}|${i}|-1`,`${ki}|${i}|1`,i>0,i<list.length-1,dis)}<button class="icox" data-rdel="${ki}|${i}" ${dis} aria-label="เอาออกจากคิว" title="เอาออกจากคิว">${ICON_X}</button></div>`).join('')}</div>
       ${rest.length&&!dis?`<select class="textin" data-radd="${ki}"><option value="">+ เพิ่มคนท้ายคิว</option>${rest.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>`:''}</details>`}).join('');
   return `<div class="card"><h3>คิวหมุนเวร</h3><p class="hint">เปิดแล้ว ปุ่มจัดอัตโนมัติจะจัด <b>OT</b> และ <b>เวรประจำวันนักขัตฤกษ์</b> ตามลำดับคิว (วันละ 1 คนต่อช่อง) · คิวนักขัตฤกษ์รวมเสาร์-อาทิตย์ที่ติดกับวันนักขัตฤกษ์ และถ้าห่างกันแค่ 1 วันทำงาน วันทำงานที่คั่นกับเสาร์-อาทิตย์นั้นก็เข้าคิวด้วย · คนที่ถึงคิวแต่ลา/ติดเวรวันนั้นจะถูกข้าม และได้วันถัดไปแทน · คิวต่อจากเดือนก่อนอัตโนมัติ · ช่องที่แก้มือนับว่าคนนั้นใช้คิวแล้ว</p>
+    ${dis?'':`<button class="btn btn-line" id="rotPreset" style="margin:4px 0 8px">ตั้งคิวตามหลักเกณฑ์ปี 2570</button>`}
     <div class="row"><label>ใช้คิวหมุนเวร<small>ปิด = ระบบเกลี่ยจำนวนเวรเหมือนเดิม</small></label><button class="switch ${on?'on':''}" id="rotOn" aria-label="เปิด/ปิด" ${dis}></button></div>
     <div class="row"><label>เริ่มหมุนตั้งแต่วันที่<small>ก่อนวันนี้ระบบจัดแบบเดิม</small></label><input type="date" class="textin" id="rotStartIn" style="max-width:180px" value="${esc(R.start||'')}" ${dis}></div>
     ${lists}</div>`;
@@ -563,6 +582,7 @@ function rotationCard(dis){
 function bindRotationCard(Bx){
   const ch=()=>{addLog('แก้คิวหมุนเวร');markDirty();renderAll()};
   const ro=$('#rotOn');if(ro)ro.onclick=()=>{pushUndo();rotList(ROT_KINDS[0],true);state.rules.rotation.on=!state.rules.rotation.on;ch()};
+  const rp=$('#rotPreset');if(rp)rp.onclick=applyPreset2570ToUnit;
   const rs=$('#rotStartIn');if(rs)rs.onchange=()=>{pushUndo();rotList(ROT_KINDS[0],true);state.rules.rotation.start=rs.value;ch()};
   Bx.querySelectorAll('[data-rmv]').forEach(b=>b.onclick=()=>{const [ki,i,d]=b.dataset.rmv.split('|').map(Number);pushUndo();const l=rotList(ROT_KINDS[ki],true);[l[i],l[i+d]]=[l[i+d],l[i]];ch()});
   Bx.querySelectorAll('[data-rdel]').forEach(b=>b.onclick=()=>{const [ki,i]=b.dataset.rdel.split('|').map(Number);pushUndo();rotList(ROT_KINDS[ki],true).splice(i,1);ch()});
@@ -570,6 +590,56 @@ function bindRotationCard(Bx){
   Bx.querySelectorAll('[data-radd]').forEach(s=>s.onchange=()=>{if(!s.value)return;pushUndo();rotList(ROT_KINDS[+s.dataset.radd],true).push(s.value);ch()});
   // คงสถานะเปิด/ปิดของรายการคิวหลัง render ใหม่
   Bx.querySelectorAll('details.rotk').forEach((d,i)=>{d.open=!!(window.__rotOpen||{})[i];d.ontoggle=()=>{(window.__rotOpen=window.__rotOpen||{})[i]=d.open}});
+}
+/* ตั้งคิวหมุนเวรของแผนกที่มีอยู่แล้วตามหลักเกณฑ์ปี 2570 — จับคู่จากชื่อ (ชื่อเต็ม หรือคำแรกของชื่อ) */
+/* คีย์เทียบชื่อไทยแบบไม่สนการสะกดเล็กน้อย: ตัด “พยัญชนะ+การันต์” (เช่น ค์ ย์) และวรรณยุกต์ออก — ปรางค์ทิพย์ = ปรางทิพย์ */
+const thaiKey=s=>String(s||'').normalize('NFC').replace(/[\u0E01-\u0E2E][\u0E38\u0E39]?\u0E4C/g,'').replace(/[\u0E48-\u0E4B\u0E4D\u0E4E]/g,'').trim();
+/* แผนการตั้งคิวตามหลักเกณฑ์ปี 2570 สำหรับแผนกนี้ — จับคู่จากชื่อ (ชื่อเต็ม หรือคำแรกของชื่อ) */
+function preset2570Plan(){
+  const P=PRESET_2570,missing=[];
+  const first=x=>String(x.name).replace(/^(คุณ|น\.ส\.|นางสาว|นาง|นาย)\s*/,'').split(/\s+/)[0];
+  const find=nm=>{const s=state.staff.find(x=>x.name===nm)||state.staff.find(x=>first(x)===nm)||state.staff.find(x=>thaiKey(first(x))===thaiKey(nm));
+    if(!s&&!missing.includes(nm))missing.push(nm);return s};
+  const ids=list=>list.map(find).filter(Boolean).map(s=>s.id);
+  const from=(list,first)=>{const i=list.indexOf(first);return ids([...list.slice(i),...list.slice(0,i)])};
+  const otOnly=[...P.otOnlyRN,...P.otOnlyPN].map(find).filter(Boolean);
+  const plan={on:true,start:P.start,otrn:ids(P.otrn),otpn:ids(P.otpn),hol:{senior:from(P.senior,P.holStart.senior),junior:from(P.junior,P.holStart.junior),pn:from(P.pn,P.holStart.pn)},
+    pins:presetPins(nm=>{const s=find(nm);return s&&s.id})};
+  const all=[...new Set([...P.senior,...P.junior,...P.pn,...P.otOnlyRN,...P.otOnlyPN])];
+  return{plan,otOnly,missing,found:all.length-missing.filter(n=>all.includes(n)).length,total:all.length};
+}
+/* สิ่งที่แผนกนี้ยังไม่ตรงหลักเกณฑ์ปี 2570 (ใช้แสดงแถบเตือน) — [] = ตรงแล้ว หรือแผนกนี้ไม่ใช่รายชื่อชุดนี้ */
+function preset2570Issues(){
+  const {plan,otOnly,found,total}=preset2570Plan();if(found<total*0.7)return[];
+  const R=state.rules.rotation||{},hol=R.hol||{},out=[];
+  if(!R.on)out.push('ยังไม่ได้เปิดคิวหมุนเวร');
+  if(R.start!==plan.start)out.push('วันเริ่มคิวไม่ใช่ 1 ม.ค. 2570');
+  if(JSON.stringify(R.pins||{})!==JSON.stringify(plan.pins))out.push('ยังไม่ได้กำหนดคน 1–3 ม.ค. 2570 ตามตาราง');
+  if((R.otrn||[])[0]!==plan.otrn[0]||(R.otpn||[])[0]!==plan.otpn[0])out.push('คิว OT ไม่ได้เริ่มที่พิมพ์พจี / กิตติมา');
+  if(['senior','junior','pn'].some(k=>(hol[k]||[])[0]!==plan.hol[k][0]))out.push('คิวนักขัตฤกษ์ไม่ได้เริ่มที่พิมพ์พจี / พรญาณี / ช่อทิพย์');
+  if(otOnly.some(s=>s.oc!==false))out.push('ยังมีคนขึ้นเฉพาะ OT ที่ถูกจัดเวรประจำ');
+  return out;
+}
+function applyPreset2570ToUnit(){
+  const P=PRESET_2570;const {plan,otOnly,missing}=preset2570Plan();
+  const ym=monthPrefix(),has=monthSlots().some(s=>state.assign[s.key]&&state.assign[s.key].id),redo=has&&ym>=P.start.slice(0,7);
+  confirmBox('ตั้งคิวตามหลักเกณฑ์ปี 2570?',`<ul style="margin:0;padding-left:18px">
+    <li>เปิดคิวหมุนเวร เริ่ม 1 ม.ค. 2570</li>
+    <li>OT RN (${plan.otrn.length} คน): ${esc(plan.otrn.map(firstName).join(' → '))}</li>
+    <li>OT PN (${plan.otpn.length} คน): ${esc(plan.otpn.map(firstName).join(' → '))}</li>
+    <li>คิวนักขัตฤกษ์: Senior เริ่มพิมพ์พจี · Junior เริ่มพรญาณี · PN เริ่มช่อทิพย์</li>
+    <li>1–3 ม.ค. 2570 กำหนดคนตามตาราง: พิมพ์พจี/พรญาณี/ช่อทิพย์ · วันวิสา/อติกานต์/จีราวัลย์ · วิภา/ธันยพร/วราภรณ์ (2–3 ม.ค. เป็นวันหยุดปีใหม่)</li>
+    <li>ตั้ง ${otOnly.length} คนเป็น “OT อย่างเดียว”: ${esc(otOnly.map(s=>s.name).join(', '))}</li>
+    ${redo?`<li><b>จัดเวร${esc(monthTitle())}ใหม่ทันที</b> (คงช่องที่ล็อกไว้ ยกเว้น 1–3 ม.ค. ที่ใช้ตามตาราง)</li>`:''}</ul>
+    ${missing.length?`<p style="color:var(--red);margin:8px 0 0">ไม่พบชื่อในแผนก: ${esc(missing.join(', '))} — คนเหล่านี้จะไม่อยู่ในคิว (เพิ่มรายชื่อก่อนแล้วกดใหม่ได้)</p>`:''}
+    <p class="hint" style="margin:8px 0 0">คิวเดิมของแผนกนี้จะถูกแทนที่ · กด “ย้อนกลับ” ได้</p>`,
+    [{label:'ยกเลิก'},{label:redo?'ตั้งคิวและจัดเวรใหม่':'ตั้งคิว',cls:'btn-primary',fn:()=>{
+      pushUndo();state.rules.rotation=plan;Object.assign(state.holidayOverrides,P.holidays);
+      otOnly.forEach(s=>{s.oc=false;s.ot=true;s.noShift=[]});
+      for(const k in state.assign){const a=state.assign[k];if(a&&otOnly.some(s=>s.id===a.id)&&!SLOTM[k.split('|')[2]].ot)delete state.assign[k];}
+      let un=0,nf=0;if(redo)un=autoFill('keepLocked');else nf=refillEmpty();
+      addLog('ตั้งคิวหมุนเวรตามหลักเกณฑ์ปี 2570'+(redo?` และจัดเวร${monthTitle()}ใหม่`:nf?` (หาคนแทน ${nf} ช่อง)`:''));markDirty();renderAll();
+      toast(redo?(un?`ตั้งคิวและจัดใหม่แล้ว แต่ยังว่าง ${un} ช่อง`:'ตั้งคิวและจัดเวรใหม่แล้ว')+' — กด › แล้ว “จัดเวรอัตโนมัติ” เดือนถัดไปทีละเดือน':'ตั้งคิวแล้ว — ไปเดือน ม.ค. 2570 แล้วกด “จัดเวรอัตโนมัติ” ทีละเดือน');}}]);
 }
 /* ---------- การ์ดกฎห้ามอยู่เวรร่วมกัน (rules.conflicts) ---------- */
 const slotName=s=>s==='any'?'ช่องใดก็ได้':'ช่อง '+SLOTM[s].short;
@@ -824,6 +894,8 @@ async function holidayTableRows(year){
     const cells=HOL_COLS.map(c=>{
       const n=needFor(d,c.pos);if(!n)return{names:[],fc:false};
       let ids=idsOn(d,c.pos),fc=false;
+      const pin=inRot&&(((state.rules.rotation||{}).pins||{})[d]||{})[c.pos];
+      if(pin&&person(pin))ids=[pin]; // วันที่กำหนดคนตายตัว ใช้ตามตารางเสมอ
       if(!ids.length&&inRot){ids=[];for(let i=0;i<n;i++){const id=q[c.pos].find(x=>!ids.includes(x)&&eligible(person(x),c.pos)&&!(state.unavail[x]&&state.unavail[x][d]));if(id)ids.push(id)}fc=ids.length>0;}
       if(inRot)ids.forEach(id=>{const j=q[c.pos].indexOf(id);if(j>=0){q[c.pos].splice(j,1);q[c.pos].push(id)}});
       return{names:ids.map(firstName),fc};});

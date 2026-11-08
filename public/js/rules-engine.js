@@ -186,7 +186,17 @@ function rotStartQueue(kind){
   return q;
 }
 /* phase: 'hol' | 'ot' · simulate=true: ไม่เติมช่องว่าง แค่นับคิวจากที่จัดไว้ · until: หยุดก่อนวันนี้ */
+/* วันที่กำหนดคนตายตัว (rules.rotation.pins = {'YYYY-MM-DD':{senior:id,junior:id,pn:id}}) เช่น ตาราง 1–3 ม.ค. 2570
+   ใส่ทับช่องเดิมก่อนเดินคิว แล้วนับว่าคนนั้นใช้คิวแล้ว คิวจึงไล่ต่อจากตารางนี้ */
+function applyPins(asg){
+  const pins=(state.rules.rotation&&state.rules.rotation.pins)||{};
+  for(const iso of monthDays()){const p=pins[iso];if(!p)continue;
+    ROT_KINDS.filter(k=>k.hol).forEach(kind=>{const id=p[kind.slot];if(!id||!person(id)||rotKindOf(iso,kind.slot)!==kind)return;
+      const sh=shiftsOf(iso)[0];if(!sh||!needFor(iso,kind.slot))return;
+      pairKeys(`${iso}|${sh}|${kind.slot}|0`).forEach(k=>{asg[k]={id,locked:false,rot:true,pin:true}});});}
+}
 function applyRotation(asg,phase,simulate,until){
+  if(phase==='hol'&&!simulate)applyPins(asg);
   const idx=buildIndex(asg);const queues={};let unfilled=0;
   ROT_KINDS.filter(k=>phase==='hol'?k.hol:!k.hol).forEach(kind=>{
     const q=rotStartQueue(kind);
@@ -231,8 +241,9 @@ function autoFill(mode){
     if(mode==='fix'){const pr=problems(k,a.id,curIdx);const mm=pairMismatch(k,state.assign);
       if((!pr.length&&!mm)||(a.locked&&!pr.some(p=>p.lv===2)))base[k]=a;}
   }
-  // วันนักขัตฤกษ์จัดตามคิวก่อน แล้วค่อยเกลี่ยเวรที่เหลือ (OT ตามคิวจัดทีหลัง เพราะต้องรู้เวรประจำทั้งเดือน)
+  // จัดตามคิวก่อน: วันนักขัตฤกษ์ แล้ว OT (ลำดับคิว OT ต้องตรงทุกวัน) — เวรประจำที่เหลือจะเกลี่ยโดยหลบคนที่อยู่ OT วันนั้น
   const rotHol=rot?applyRotation(base,'hol').unfilled:0;
+  const rotOt=rot?applyRotation(base,'ot').unfilled:0;
   const iters=mode==='fix'?150:300;let best=null;
   for(let it=0;it<iters;it++){
     const asg=Object.assign({},base);const idx=buildIndex(asg);let unfilled=0;
@@ -259,7 +270,6 @@ function autoFill(mode){
     ['otrn','otpn'].forEach(sl=>{const ids=state.staff.filter(s=>eligible(s,sl)).map(s=>s.id);score+=variance(ids.map(id=>effCounts(idx,id).ot))*40;});
     if(!best||score<best.score)best={asg,score,unfilled};
   }
-  const rotOt=rot?applyRotation(best.asg,'ot').unfilled:0;
   mk.forEach(k=>{delete state.assign[k]});
   mk.forEach(k=>{if(best.asg[k])state.assign[k]=best.asg[k]});
   return best.unfilled+rotHol+rotOt;
